@@ -1,0 +1,17 @@
+Nachladbarer GIDE-Treiber für CP/M2.x basierende Z80-Systeme
+Aus dem CP/A Für Robotron-Buerocomputer mit HD-Unterstützung und dem nachladbaren RAM-Floppytreiber (RAF)
+entstand nachfolgender Treiber, der sich zur Zeit noch im Teststadium befindet.
+Technisch bedingt ist er nicht kompatibel zu den bisherigen CP/A-Systemen mit intergrierten GIDE-Treiber.
+Zum vorbereiten des Speichermediums dient  DUF05 ( http://www.cpm.z80.de/download/duf05.zip )
+Menüpunkt "4...REMOVE ALL INVALID DIRECTORY ENTRIES" . Mit dem Befehl era *.* kann im Nachgang noch bereinigt werden.
+
+Standardmässig arbeitet der Treiber auf Adressbereich D0h als Laufwerk O
+
+V0.1 - erste lauffähige Version
+V0.2 - Fehlerbereinigung Allocation Vector
+V0.3 - dirbuf verlegt nach intern (bringt ca. 128byte mehr TPA)
+V0.4 - Quickformat integriert Aufruf gidn /F damit wird DUF05 nicht mehr benoetigt
+       Laufwerk auf N: umgestellt 
+
+
+

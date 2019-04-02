@@ -1,0 +1,268 @@
+;-----------------------------------------------------
+;
+;	UTools Version 1.4 (von M. Leubner)
+;
+; Hilfsprogramme zur Arbeit mit USB-Sticks unter CP/M
+;
+;	USB-Direktkommando ausfuehren
+;
+; USB.Z80 -> USB.COM	08.01.2008 - 03.05.2011
+;-----------------------------------------------------
+; Uebersetzung:		SLRZ80 USB/R
+;			SLRNK USB/N,/V,/A:100,USB,/E
+;			ERA USB.REL
+;-----------------------------------------------------
+
+	.Z80
+	CSEG
+
+	JP	START		; eigentlicher Programstart
+	DB	'Z3ENV'		; ENV von Z-System
+	DB	1		; Typ-1
+ENVPTR:	DW	0		; Zeiger zu ENV-Beschreibung
+	DW	100h		; ORG-Adresse
+
+; Konfigurationsdatenbereich:
+
+	DB	'USB14   '	; Name der CFG-Datei
+VERS:	DB	14H		; Version 1.4
+OPTION:	DB	00000001b	; Optionen:
+;	Bit 0	       ^--------- Anzeige der noch vorhandenen Daten bei Start
+;	Bit 1	      ^---------- Verzeichnis sortieren?
+;	Bit 3+2	    ^^----------- 00 nachfragen
+;	Bit 3+2	    ^^----------- 01 ueberschreiben
+;	Bit 3+2	    ^^----------- 10 ignorieren
+;	Bit 3+2	    ^^----------- 11 update nach Dateidatum
+;	Bit 4	   ^------------- Textdatei?
+;	Bit 5	  ^-------------- Ausfuehrliche Verzeichnisanzeige
+;	Bit 6	 ^--------------- noch frei (evtl. Druckprotokoll?)
+;	Bit 7	^---------------- Fortschrittsanzeige (0=% 1=#)
+TAKT:	DB	FREQ		; CPU-Taktfrequenz in MHz
+
+excl:	DS	10*11,' '	; 10 auszuschliessende Dateien
+
+;-----------------------------------------------------
+
+	include	USBINC.Z80	; allgemeine Unterprogramme
+
+;-----------------------------------------------------
+
+HELP:	call	version		; Programmversion
+	call	eprint
+	db	cr,lf
+	db	' USB.COM gibt Kommandos direkt zum Vinculum aus.',cr,lf
+	db	cr,lf
+	db	' Beispiele:',cr,lf
+	db	'   USB                 - Pruefen ob Laufwerk vorhanden ist',cr,lf
+	db	'   USB FWV             - Anzeige der Vinculum-Firmware-Version',cr,lf
+	db	'   USB IDD             - Anzeige der Laufwerksinformationen',cr,lf
+	db	'   USB DIR             - Anzeige des unsortierten Verzeichnisses',cr,lf
+	db	'   USB CD /            - Geht zum Hauptverzeichnis',cr,lf
+	db	'   USB CD <dirname>    - Wechsel in Unterverzeichnis',cr,lf
+	db	'   USB CD ..           - Verzeichnisebene zurueck',cr,lf
+	db	'   USB MKD <dirname>   - Unterverzeichnis anlegen',cr,lf
+	db	'   USB DLD <dirname>   - leeres Unterverzeichnis loeschen',cr,lf
+	db	'   USB DLF <filename>  - Datei loeschen',cr,lf
+	db	'   USB RD <filename>   - (Text-)Datei anzeigen',cr,lf
+	db	'   USB REN <alt> <neu> - Datei umbenennen',cr,lf
+	db	'   USB //              - Anzeige der Hilfeseite',cr,lf
+	db	0
+	rst	0
+;
+START:	ld	hl,defdma	; Kommandozeile analysieren
+	ld	a,(hl)
+	ld	b,a		; Anzahl
+	or	a
+	jr	z,trail3	; keine Parameter angegeben
+trail1:	inc	hl
+	ld	a,(hl)		; 1. Zeichen testen
+	cp	' '
+	jr	z,trail2
+	cp	'/'
+	jp	z,help		; // ist CP/M Hilfeanforderung!
+	jr	trail3
+trail2:	djnz	trail1		; Leerzeichen am Anfang uebergehen
+trail3:	push	hl
+	push	bc
+	call	synchr		; Synchronisation
+	pop	bc
+	pop	hl
+	jp	c,exit
+
+; Extended CMD-Modus aktivieren:
+
+	LD	A,ECS		; Extended CMD-Modus
+	CALL	put
+	LD	A,CR		; Kommandoabschluss
+	CALL	put
+ecs1:	CALL	GET		; Ergebnis holen
+	jr	c,exit		; BRK oder TimeOut!
+	CP	'>'
+	JR	NZ,ecs1		; warten bis Prompt kommt
+	CALL	GET
+	jr	c,exit		; BRK oder TimeOut
+	CP	CR
+	jr	nz,exit		; kein CR nach Prompt!
+
+; Ausgabe Kommando:
+
+	push	hl		; Kommandobeginn merken
+	inc	b		; bei Laenge=0 nur cr!
+	jr	ausg2
+ausg1:	ld	a,(hl)		; Kommandozeilenrest
+	inc	hl
+	call	put		; zum VDIP1 senden
+ausg2:	djnz	ausg1
+	ld	(hl),0		; Ende-0 anhaengen (zur Sicherheit)
+	pop	hl
+	ld	a,(hl)
+	cp	'M'		; Testen ob Kommando "MKD_?" ist
+	jr	nz,ausg4
+	inc	hl
+	ld	a,(hl)
+	cp	'K'
+	jr	nz,ausg4
+	inc	hl
+	ld	a,(hl)
+	cp	'D'
+	jr	nz,ausg4
+	inc	hl
+	ld	a,(hl)
+	cp	' '
+	jr	nz,ausg4
+ausg3:	inc	hl
+	ld	a,(hl)
+	cp	' '
+	jr	z,ausg4		; weiteres Leerzeichen darf nicht sein!
+	or	a		; bis Kommandoende weitersuchen
+	jr	nz,ausg3
+	call	mdatum		; Systemdatum dem Kommando anhaengen
+ausg4:	ld	a,cr
+	call	put		; Kommando abschliessen
+
+; Rueckgabe abholen:
+
+eing0:	ld	hl,$memry	; Ablagepuffer
+eing1:	call	get		; Daten holen
+	jr	c,exit		; BRK oder TimeOut
+	cp	cr		; Zeilenende?
+	jr	z,eing2		; ja, testen ob fertig
+	ld	(hl),a		; im Speicher merken
+	inc	hl
+	call	crtx		; und anzeigen
+	jr	eing1
+	;
+eing2:	call	crtx		; cr anzeigen
+	ld	de,errtab	; Fertigmeldungen testen
+	dec	hl		; zurueck zu letztem Zeichen
+eing3:	push	hl
+eing4:	ld	a,(de)
+	dec	de
+	or	a
+	jr	z,exit1		; Zeichenkette gefunden -> fertig!
+	cp	cr
+	jr	z,exit1		;		- " -
+	cp	(hl)
+	dec	hl
+	jr	z,eing4		; Zeichen stimmt
+	pop	hl
+eing5:	ld	a,(de)		; in den Vergleichsketten
+	dec	de
+	or	a		; Trennzeichen zu naechster Meldung suchen
+	jr	z,eing3		; und testen
+	cp	cr		; erste Meldung erreicht?
+	jr	z,eing0		; keine hinterlegte Meldung, also weiter
+	jr	eing5
+
+exit1:	pop	hl
+exit:	call	deinit		; Treiber deaktivieren
+	rst	0
+
+; CP/M Systemdatum+Zeit bei MKD anhaengen:
+
+mdatum:	ld	c,_getver
+	call	bdos		; CP/M Version holen
+	cp	22h
+	ret	nz		; nicht 2.2-kompatibel!
+	ld	c,_dosver
+	call	bdos		; erweiterte DOS-Version holen
+	ld	a,h
+	cp	'S'		; ZSDOS?
+	jr	z,mdat1
+	cp	'D'		; ZDDOS?
+	ret	nz
+mdat1:	ld	de,Datum
+	ld	c,_GETCLK
+	call	bdos		; aktuelle Uhrzeit holen
+	dec	a
+	ret	nz		; Fehler beim Uhrzeit lesen!
+	ld	de,Datum
+	ld	hl,DOSDAT
+	call	u2mtim		; Datum fuer DOS konvertieren
+	ret	nz		; Fehler beim konvertieren!
+	ld	a,' '		; Leerzeichen
+	call	put
+	LD	HL,DOSDAT+3	; Datum im DOS-Format
+	LD	B,4		; 4 Byte = 32 Bit
+mdat2:	LD	A,(HL)
+	dec	HL
+	CALL	put
+	DJNZ	mdat2
+	ret
+
+; Dateidatum anzeigen:
+
+danz:	call	eprint
+	db	'Datum: ',0
+	ld	a,(Tag)
+	call	pa2hc
+	ld	a,'.'
+	call	cout
+	ld	a,(Monat)
+	call	pa2hc
+	ld	a,'.'
+	call	cout
+	ld	a,(Jahr)
+	cp	78h
+	ld	a,19h		; Jahrhundert 1978-1999
+	adc	a,0
+	daa			; oder 2000-2077
+	call	pa2hc
+	ld	a,(Jahr)
+	call	pa2hc
+	ld	a,' '
+	call	cout
+	ld	a,(Stunde)
+	call	pa2hc
+	ld	a,':'
+	call	cout
+	ld	a,(Minute)
+	call	pa2hc
+	ret
+
+	dseg
+
+; Liste der moeglichen Fertigmeldungen:
+
+	db	cr
+	db	'Bad Command',0		; Fehlermeldungen
+	db	'Command Failed',0
+	db	'Disk Full',0
+	db	'Invalid',0
+	db	'Read Only',0
+	db	'File Open',0
+	db	'Dir Not Empty',0
+	db	'Filename Invalid',0
+	db	'No Disk',0		; Prompt - ohne USB-Stick
+	db	'D:\>'			; Prompt - wenn OK
+ERRTAB	equ	$-1
+
+DOSDAT:		DW	0,0	; MS-DOS Datum
+Datum:		DS	6,0	; System-Datum im CP/M-Format (BCD)
+JAHR	equ	Datum
+MONAT	equ	Datum+1
+TAG	equ	Datum+2
+STUNDE	equ	Datum+3
+MINUTE	equ	Datum+4
+
+	end

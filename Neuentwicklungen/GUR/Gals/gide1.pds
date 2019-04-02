@@ -1,0 +1,38 @@
+TITLE           Generic IDE GAL IC1
+PATTERN         01
+REVISION        02
+AUTHOR          Tilmann Reh
+COMPANY         AutoMeter
+DATE            26.09.1995
+
+CHIP GIDE1 PALCE16V8
+
+tog1 a0 clk a1 /wr a2 a3 /rd /selq gnd
+/oe /iord /rdq /enlo lh /iowr /enhi /rclk tog vcc
+
+STRING CS1ADR '(/A3 * A2 * A1)'                 ; CS1       Addr. x6..x7
+STRING DATADR '(A3 * /A2 * /A1 * /A0)'          ; CS0/Data  Addr. x8
+STRING TFRADR '(A3 * (A2 + A1 + A0))'           ; CS0/Task  Addr. x9..xF
+
+SIGNATURE TR-GIDE1
+
+EQUATIONS
+
+LH := /LH * /TFRADR                             ; FlipFlop: LSB/MSB toggle,
+                                                ; reset at Task File accesses
+
+/TOG = (DATADR+TFRADR) * SELQ * (RD+WR)         ; LH-Clock: Data & Task File
+
+RDQ = RD * /SELQ                                ; accesses to host peripherals
+
+RCLK = DatAdr * SELQ * (Rd+Wr) * /LH * CLK      ; reg. Clock at R/W of data LSB
+
+IORD = (TFRAdr+CS1Adr+ DatAdr*/LH) * SELQ * RD  ; read accesses to drive
+
+IOWR = (TFRAdr+CS1Adr+ DatAdr*LH) * SELQ * WR   ; write accesses to drive
+
+ENHI = DatAdr * LH * SELQ * (Rd+Wr)             ; en. MSB output to drive/Bus
+
+ENLO = (TFRAdr+CS1Adr) * (Rd+Wr) * SELQ         ; LSB direct transfer (TFR/CS1)
+     + DatAdr * (/LH*RD + LH*WR) * SELQ         ; LSB transfer (Data)
+

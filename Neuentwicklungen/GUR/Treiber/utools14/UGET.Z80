@@ -1,0 +1,1035 @@
+;-----------------------------------------------------
+;
+;	UTools Version 1.4 (von M. Leubner)
+;
+; Hilfsprogramme zur Arbeit mit USB-Sticks unter CP/M
+;
+;	Dateien von USB-Stick lesen
+;
+; UGET.Z80 -> UGET.COM	12.01.2008 - 03.05.2011
+;-----------------------------------------------------
+; Uebersetzung:		SLRZ80 UGET/R
+;			SLRNK UGET/N,/V,/A:100,UGET,/E
+;			ERA UGET.REL
+;-----------------------------------------------------
+
+	.Z80
+	CSEG
+
+	JP	START		; eigentlicher Programstart
+	DB	'Z3ENV'		; ENV von Z-System
+	DB	1		; Typ-1
+ENVPTR:	DW	0		; Zeiger zu ENV-Beschreibung
+	DW	100h		; ORG-Adresse
+
+; Konfigurationsdatenbereich:
+
+	DB	'USB14   '	; Name der CFG-Datei
+VERS:	DB	14H		; Version 1.4
+OPTION:	DB	00000010b	; Optionen (Voreinstellung):
+;	Bit 0	       ^--------- Anzeige der noch vorhandenen Daten bei Start
+;	Bit 1	      ^---------- Verzeichnis sortieren?
+;	Bit 3+2	    ^^----------- 00 nachfragen
+;	Bit 3+2	    ^^----------- 01 ueberschreiben
+;	Bit 3+2	    ^^----------- 10 ignorieren
+;	Bit 3+2	    ^^----------- 11 update nach Dateidatum
+;	Bit 4	   ^------------- Textdatei?
+;	Bit 5	  ^-------------- Ausfuehrliche Verzeichnisanzeige
+;	Bit 6	 ^--------------- noch frei (evtl. Druckprotokoll?)
+;	Bit 7	^---------------- Fortschrittsanzeige (0=% 1=#)
+TAKT:	DB	FREQ		; CPU-Taktfrequenz in MHz
+
+excl:	db	'!!!TIME&DAT'	; 10 auszuschliessende Dateien
+	db	'????????TMP'	; temporaere Dateien
+	db	'$$$     SUB'	; System-Submit
+	db	'????????$?$'	; temporaere Dateien
+	db	'????????BAK'	; Backup-Dateien
+	db	'[??????]???'	; Dateien mit def. Sektoren
+	db	'BACKUP  LOG'	; Backup.Log nicht automatisch sichern!
+	db	'           '	;
+	db	'           '	;
+	db	'           '	;
+
+;-----------------------------------------------------
+
+	include	USBINC.Z80	; allgemeine Unterprogramme
+
+;-----------------------------------------------------
+
+HELP:	call	version		; Programmversion
+	call	eprint
+	db	cr,lf
+	db	' UGET.COM liest Dateien vom USB-Stick.',cr,lf
+	db	cr,lf
+	db	' Kommandoformen:',cr,lf
+	db	'   UGET <name> /opt     - Datei(en) in aktuelles Verzeichnis',cr,lf
+	db	'   UGET <dir:name> /opt - Datei(en) in angegebenes Verzeichnis',cr,lf
+	db	cr,lf
+	db	' Optionen:',cr,lf
+	db	'   / - Anzeige der Hilfeseite',cr,lf,0
+	ld	hl,option
+	bit	0,(hl)
+	jr	nz,h0
+	call	eprint
+	db	'   V - vorher anliegenden Meldungen anzeigen',cr,lf,0
+h0:	ld	a,(hl)
+	and	0ch
+	cp	2
+	jr	z,h2
+	call	eprint
+	db	'   I - vorhandene Dateien ungefragt ignorieren',cr,lf,0
+h2:	cp	1
+	jr	z,h3
+	call	eprint
+	db	'   O - vorhandene Dateien ungefragt ersetzen',cr,lf,0
+h3:	cp	3
+	jr	z,h4
+	call	eprint
+	db	'   U - vorhandene Dateien aktualisieren',cr,lf,0
+h4:	bit	1,(hl)
+	jr	nz,h1
+	call	eprint
+	db	'   S - sortiere Dateiliste',cr,lf,0
+h1:
+	bit	7,(hl)
+	jr	nz,h7
+	call	eprint
+	db	'   M - Fortschrittsanzeige wie MTOOLs',cr,lf,0
+h7:
+	rst	0		; Abbruch
+
+; Programmstart:
+
+START:	LD	HL,(BDOS+1)
+	LD	L,0
+	LD	SP,HL		; Stack unterhalb BDOS legen
+	dec	h
+	ld	(tpaend),hl	; Obergzenze fuer Verzeichnispuffer
+	ld	a,(FCB1+1)	; 1. Parameter testen
+	cp	'/'
+	jp	z,help		; // ist Hilfe
+	cp	' '
+	jp	z,help		; kein Parameter -> Hilfe
+	setopt			; Optionen setzen
+	call	putud		; DU: merken
+	call	synchr		; Synchronisation
+	jp	c,exit
+
+; Test, ob USB-Stick angeschlossen ist:
+
+	LD	A,SCS		; Short CMD-Modus
+	CALL	put
+	CALL	EXEC
+	jp	c,exit		; Error
+
+	LD	A,IPH		; HEX- bzw. BIN-Modus
+	CALL	put
+	CALL	EXEC
+	jp	c,exit		; Error
+
+	call	exec		; Flash-Disk vorhanden?
+	jp	c,exit
+
+; Test ob Wildcards enthalten sind:
+
+	ld	a,(fcb1)	; Laufwerk
+	ld	(drive),a
+	ld	a,(fcb1+13)	; USER-Bereich
+	ld	(user),a
+	ld	hl,fcb1+1	; Dateiname
+	ld	b,11
+	ld	c,0		; keine Wildcard
+sw:	ld	a,(hl)
+	inc	hl
+	cp	'?'		; Wildcard?
+	jr	nz,now
+	ld	c,1		; Wildcard gefunden
+now:	djnz	sw
+	ld	a,c
+	ld	(wild),a	; hier eine 1 wenn mehrdeutiger Dateiname
+	or	a
+	jp	z,test0		; einzelne Datei direkt einlesen
+
+; Verzeichnis lesen und sortieren:
+
+	call	rd_dir		; Verzeichnis einlesen
+	jp	c,exit		; Fehler
+	ld	hl,(count)	; Anzahl gefundener Dateien
+	call	phlfdc
+	call	eprint
+	db	' Datei(en)',0
+	ld	a,h
+	or	l
+	jp	z,exit		; keine Dateien entsprechen der Maske!
+	call	sort		; Eintraege sortieren
+	call	eprint
+	db	', lesen:',cr,lf,0
+	ld	hl,1
+	ld	(counter),hl	; lfd. Datei = 1
+
+; FCB fuer naechste Datei erzeugen:
+
+next:	ld	hl,(table)
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl		; Tabelle gleich auf naechsten Eintrag setzen
+	ld	(table),hl
+	ex	de,hl		; Zeiger auf Eintrag jetzt in HL
+	ld	de,fcb1
+	ld	a,(drive)
+	ld	(de),a		; Laufwerk eintragen
+	inc	de
+	ld	bc,11
+	ldir			; Name+Typ in FCB kopieren
+	xor	a
+	ld	(de),a		; FCB+12: Extent = 0
+	inc	de
+	ld	a,(user)
+	ld	(de),a		; FCB+13: Userbereich eintragen
+	inc	de
+	ld	h,d
+	ld	l,e		; HL=FCB+14
+	ld	(hl),0
+	inc	de		; DE=FCB+15
+	ld	bc,22
+	ldir			; Rest von FCB loeschen
+
+	call	eprint
+	db	cr,lf		; Leerzeile zwischen den Dateien
+	db	'Datei ',0
+	ld	hl,(counter)
+	call	phlfdc		; Dateinummer
+	call	eprint
+	db	' von ',0
+	ld	hl,(count)
+	call	phlfdc		; Gesamtanzahl
+	call	eprint
+	db	':',cr,lf,0
+
+; Dateigroesse abfragen:
+
+test0:	ld	a,dir		; DIR <dateiname>
+	call	outnam		; um Dateigroesse zu ermitteln
+	ld	a,cr
+	call	put		; Kommando ausfuehren
+
+	call	get		; 1. Zeichen abholen
+	jp	c,exit		; Break oder TimeOut
+	cp	cr
+	jp	nz,err7		; nicht CR
+test1:	call	get		; naechste Zeichen (Dateiname) abholen
+	jp	c,exit		; Break oder TimeOut
+	cp	cr		; CR vor Leerzeichen?
+	jp	z,err6		; dann Datei nicht vorhanden (CF-Error)
+	cp	' '		; Trennzeichen?
+	jr	nz,test1
+	ld	hl,filesize0	; Dateigroesse abholen
+	ld	b,4		; 4 Byte
+test2:	call	get
+	jp	c,exit		; Break oder TimeOut
+	ld	(hl),a
+	inc	hl
+	djnz	test2
+test3:	call	get
+	jp	c,exit
+	cp	cr		; Zeilenende erkannt?
+	jr	nz,test3
+	call	get
+	jp	c,exit
+	cp	'>'		; Prompt?
+	jp	nz,err7
+	call	get
+	jp	c,exit
+	cp	cr
+	jp	nz,err7
+
+; Dateigroesse in KByte umrechnen (fuer Anzeige):
+
+	ld	de,(filesize0+2); High-Teil
+	ld	hl,(filesize0)	; Low-Teil
+	ld	bc,1023		; aufrunden auf volle KByte
+	add	hl,bc
+	ex	de,hl
+	ld	bc,0
+	adc	hl,bc		; 32 Bit jetzt in HLDE
+	ld	b,10
+calc1:	srl	h
+	rr	l
+	rr	d
+	rr	e
+	djnz	calc1		; /1024
+	ld	a,h
+	or	l
+	jp	nz,err3		; Datei ist 64MByte oder groesser!
+	ld	(kbyte),de
+
+; Dateidatum ermitteln:
+
+	ld	a,dirt		; DIR <dateiname>
+	call	outnam		; um Dateidatum zu ermitteln
+	ld	a,cr
+	call	put		; Kommando ausfuehren
+
+	call	get		; 1. Zeichen abholen
+	jp	c,exit		; Break oder TimeOut
+	cp	cr
+	jp	c,err7		; nicht CR
+test4:	call	get		; naechste Zeichen (Dateiname) abholen
+	jp	c,exit		; Break oder TimeOut
+	cp	cr		; CR vor Leerzeichen?
+	jp	z,err6		; dann Datei nicht vorhanden (CF-Error)
+	cp	' '		; Trennzeichen?
+	jr	nz,test4
+	ld	hl,data		; Dateidatum abholen
+	ld	b,10		; 10 Byte
+test5:	call	get
+	jp	c,exit		; Break oder TimeOut
+	ld	(hl),a
+	inc	hl
+	djnz	test5
+test6:	call	get
+	jp	c,exit
+	cp	cr		; Zeilenende erkannt?
+	jr	nz,test6
+	call	get
+	jp	c,exit
+	cp	'>'		; Prompt?
+	jp	nz,err7
+	call	get
+	jp	c,exit
+	cp	cr
+	jp	nz,err7
+
+; Dateidatum konvertieren:
+
+	ld	hl,data		; erster Wert
+	ld	de,Datum1
+	call	m2utim		; Erstellt-Datum konvertieren
+	ld	hl,data+6	; dritter Wert
+	ld	de,Datum3
+	call	m2utim		; Aenderungs-Datum konvertieren
+
+; Laufwerk + Userbereich einstellen:
+
+	ld	a,(fcb1)
+	or	a		; LW angegeben?
+	jr	z,nodrv
+	dec	a
+	ld	e,a
+	ld	c,_seldsk	; LW anw{hlen
+	call	bdos
+nodrv:	ld	c,_getver
+	call	bdos
+	sub	22h		; DU: nur bei CP/M 2.2 (ZSDOS) akzeptieren
+	jr	nz,nousr
+	ld	a,(fcb1+15)
+	or	a
+	jr	nz,nousr	; DU-Error
+	ld	a,(fcb1+13)
+	ld	e,a
+	ld	c,_setusr	; USER anw{hlen
+	call	bdos
+nousr:
+
+; neue CP/M-Datei erstellen:
+
+	ld	de,fcb1
+	call	initfcb
+	call	f$open		; Datei bereits vorhanden?
+	jp	nz,make		; nein, Datei einfach neu erstellen
+
+; Dateidatum-Stempel lesen (1. Modify, 2. Create):
+
+	xor	a
+	ld	(stempel),a	; zunaechst kein Stempel vorhanden
+	ld	c,_getver
+	call	bdos		; CP/M Version holen
+	cp	22h
+	jr	nz,OPC4		; nicht 2.2-kompatibel!
+	ld	c,_dosver
+	call	bdos		; erweiterte DOS-Version holen
+	ld	a,h
+	cp	'S'		; ZSDOS?
+	jr	z,OPC1
+	cp	'D'		; ZDDOS?
+	jr	nz,OPC4
+OPC1:	ld	hl,Datum4	; Datumstempel
+	call	setdma		; als DMA-Adresse setzen
+	xor	a
+	ld	(fcb1+12),a	; Extent 0
+	ld	(fcb1+14),a	; Datenmodul 0
+	ld	de,fcb1
+	ld	c,_GETDAT
+	call	bdos		; Datumstempel lesen
+	dec	a
+	jr	nz,OPC4		; Fehler beim Stempel lesen!
+	ld	a,(Datum4+11)	; MONAT
+	or	a		; Teste Modify-Datum
+	jr	nz,OPC3		; -> OK (Monat nicht 0)
+	ld	de,Datum4+10
+	ld	hl,Datum4
+	ld	bc,5
+	ldir			; Create-Datum verwenden
+	ld	a,(Datum4+11)	; MONAT
+	or	a		; jetzt gueltig?
+	jr	z,OPC4		; kein Datum gefunden
+OPC3:	ld	a,1
+	ld	(stempel),a	; Stempel jetzt gueltig
+OPC4:	call	eprint
+	db	'Vorhandene Datei ',0
+	ld	de,fcb1+1
+	call	pfn2		; Dateiname anzeigen
+	ld	a,(stempel)
+	or	a
+	ld	hl,Datum4+10
+	call	nz,danz		; Datum anzeigen
+	ld	a,(fcb1+9)
+	rla			; R/O ?
+	jr	nc,notro
+	call	eprint
+	db	' ist schreibgeschuetzt.',cr,lf,0
+	jp	zsx		; geht nur zu ignorieren...
+
+notro:	ld	hl,option
+	ld	a,(hl)
+	and	0ch		; Option bei vorhandener Datei
+	cp	0ch		; Datum auswerten?
+	jr	nz,vorh		; nein
+	ld	a,(stempel)
+	or	a
+	jr	z,noo		; kein Datum bei vorhandener Datei!
+
+; Datum vergleichen:
+
+	ld	hl,Datum3	; Datum der zu lesenden Datei
+	ld	de,Datum4+10	; Datum der vorhandenen Datei
+	ld	a,(hl)		; Jahr (1978-2077)
+	sub	a,78h
+	ld	c,a
+	ld	a,(de)		; Jahr (1978-2077)
+	sub	a,78h
+	cp	c
+	jr	c,ers		; Jahr neuer -> ersetzen
+	jr	nz,ign		; Jahr aelter -> ignorieren
+	ld	b,4		; 4 weitere Bytes vergleichen
+dcomp:	inc	hl
+	inc	de
+	ld	a,(de)
+	cp	(hl)
+	jr	c,ers		; neuer -> ersetzen
+	jr	nz,ign		; aelter -> ignorieren
+	djnz	dcomp
+ign:	call	eprint
+	db	' keine Aktualisierung.',cr,lf,0
+	jp	zsx		; gleich -> ignorieren
+
+vorh:	bit	3,(hl)		; ignorieren?
+	jr	z,noi
+	call	eprint
+	db	' wird ignoriert.',cr,lf,0
+	jp	zsx
+	;
+noi:	bit	2,(hl)		; ungefragt ueberschreiben?
+	jr	z,noo
+ers:	call	eprint
+	db	' wird ersetzt.',cr,lf,0
+	jr	delete		; ja
+	;
+noo:	call	eprint
+	db	cr,lf,'    ersetzen mit ',0
+	ld	de,fcb1+1
+	call	pfn2		; Dateiname anzeigen
+	ld	hl,Datum3
+	call	danz		; Datum anzeigen
+	call	eprint
+	db	' (j/n)? ',0
+ask:	call	capin
+	cp	3		; Break?
+	jp	z,exit		; -> Abbruch
+	cp	'N'
+	jr	z,TOK		; nein
+	cp	'J'
+	jr	nz,ask
+tok:	push	af
+	call	cout		; Zeichen anzeigen
+	call	eprint
+	db	cr,lf,0		; und neue Zeile
+	pop	af
+	cp	'N'
+	jp	z,zsx		; diese Datei nicht loeschen
+delete:	ld	de,fcb1
+	call	f$delete	; Datei loeschen
+	jp	nz,err1
+make:	ld	de,fcb1
+	call	initfcb
+	call	f$make		; Datei erzeugen
+	inc	a
+	jp	z,err2		; Verzeichnis voll
+
+; Empfang der Datei einleiten:
+
+	call	eprint
+	db	'Lese Datei ',0
+	ld	de,fcb1+1
+	call	pfn2		; Dateiname anzeigen
+	call	eprint
+	db	' (',0
+	ld	hl,(kbyte)
+	call	phlfdc		; Anzeige Dateigroesse
+	call	eprint
+	db	' KByte',0
+	ld	hl,Datum3
+	call	danz		; Dateidatum anzeigen
+	call	eprint
+	db	')',cr,lf,0
+
+	LD	A,OPR		; Open/read
+	call	outnam		; Datei zum lesen oeffnen
+	call	exec
+	jp	c,exit		; Fehler
+ 
+; Daten lesen, Sektor fuer Sektor ...
+
+	ld	de,filesize
+	ld	hl,filesize0
+	ld	bc,4
+	ldir			; Dateigroesse in Laufvariable kopieren
+	ld	a,(option)
+	rlca
+	call	nc,PROZ		; Anfangsanzeige in Prozent
+
+READ:	ld	hl,filesize	; Dateigroesse
+	ld	a,(hl)
+	inc	hl
+	or	(hl)
+	inc	hl
+	or	(hl)
+	inc	hl
+	or	(hl)
+	jp	z,close		; 0 => fertig
+
+	ld	hl,defdma	; DMA-Puffer
+	call	setdma		; im BDOS einstellen
+	ld	de,defdma+1
+	ld	bc,127
+	ld	(hl),eof
+	ldir			; vorbelegen mit 1AH
+
+	ld	b,128		; max. Puffergroesse
+	ld	hl,filesize+3	; Dateigroesse
+	ld	a,(hl)
+	or	a
+	jr	nz,read1	; 4. Stelle > 0
+	dec	hl
+	or	(hl)
+	jr	nz,read1	; 3. Stelle > 0
+	dec	hl
+	or	(hl)
+	jr	nz,read1	; 2. Stelle > 0
+	dec	hl
+	ld	a,(hl)
+	cp	b
+	jr	nc,read1	; 1. Stelle > 128
+	ld	b,a		; der Rest
+read1:	LD	A,RDF		; Read from File
+	CALL	put
+	LD	A,' '
+	CALL	put
+	XOR	A
+	CALL	put
+	XOR	A
+	CALL	put
+	XOR	A
+	CALL	put
+	LD	A,B		; Anzahl
+	ld	(fsize),a	; merken
+	CALL	put
+	LD	A,CR
+	CALL	put
+	ld	hl,defdma	; Datenpuffer
+READ2:	CALL	GET		; Daten lesen
+	JR	C,close		; Fehler -> Datei trotzdem schliessen
+	LD	(HL),A
+	INC	HL
+	DJNZ	READ2
+	call	ex1		; Prompt, cr testen
+	jp	c,exit		; BRK/TimeOut
+
+	ld	de,fcb1
+	call	f$write		; Sektor in Datei schreiben
+	jp	nz,err4		; Schreib-Fehler
+
+	ld	hl,filesize	; (restliche) Dateigroesse
+	ld	a,(fsize)	; gelesene Blockgroesse
+	ld	b,a
+	ld	a,(hl)
+	sub	b		; -128 (oder der Rest)
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	sbc	a,0
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	sbc	a,0
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	sbc	a,0
+	ld	(hl),a
+
+	call	proz		; Fortschrittsanzeige
+	jp	read		; weiter lesen
+
+close:	ld	de,fcb1
+	call	f$close		; Datei schliessen
+	jp	nz,err5
+	LD	A,CLF		; Close File (USB)
+	CALL	outnam		; Datei schliessen
+	call	exec
+	jp	c,exit		; Fehler
+
+; Dateidatum-Stempel schreiben:
+
+	ld	c,_getver
+	call	bdos		; CP/M Version holen
+	cp	22h
+	jr	nz,notzs	; nicht 2.2-kompatibel!
+	ld	c,_dosver
+	call	bdos		; erweiterte DOS-Version holen
+	ld	a,h
+	cp	'S'
+	jr	z,zsd		; ZSDOS erkannt
+	cp	'D'
+	jr	z,zsd		; ZDDOS erkannt
+notzs:	call	eprint
+	db	' - OK.',cr,lf,0
+	jr	zsc
+	;
+zsd:	ld	hl,Datum1	; Datumstempel
+	call	setdma		; als DMA-Adresse setzen
+	xor	a
+	ld	(fcb1+12),a	; Extent 0
+	ld	(fcb1+14),a	; Datenmodul 0
+	ld	de,fcb1
+	ld	c,_SETDAT
+	call	bdos		; Datumstempel setzen
+	dec	a
+	jr	nz,notzs	; Fehler (nur beim Datum schreiben)
+ 	call	eprint
+	db	' - Datum OK.',cr,lf,0
+zsc:	ld	hl,(count2)
+	inc	hl		; uebertragene Dateien zaehlen
+	ld	(count2),hl
+zsx:	ld	a,(wild)
+	or	a
+	jp	z,exit		; Einzeldatei -> fertig
+	ld	hl,(count)
+	ld	de,(counter)
+	sbc	hl,de
+	jr	z,zus		; letzte Datei -> fertig
+	inc	de
+	ld	(counter),de
+	jp	next		; wiederholen fuer naechste Datei
+	;
+zus:	call	eprint
+	db	cr,lf,'Zusammenfassung:  ',0
+	ld	hl,(count2)
+	call	phlfdc		; Anzahl
+	call	eprint
+	db	' von ',0
+	ld	hl,(count)
+	call	phlfdc		; Gesamtanzahl
+	call	eprint
+	db	' Dateien uebertragen.',cr,lf,0
+	jp	exit
+;-------------------------------------------------------------------------------
+;
+; Fehlerbehandlung:
+;
+err1:	call	eprint
+	db	'Vorhandene Datei kann nicht geloescht werden',cr,lf,0
+	jp	exit
+;
+err2:	call	eprint
+	db	'Verzeichnis ist voll',cr,lf,0
+	jp	exit
+;
+err3:	call	eprint
+	db	'Datei ist 64 MByte oder groesser!',cr,lf,0
+	jp	exit
+;
+err4:	call	eprint
+	db	'Schreibfehler (Diskette voll?)',cr,lf,0
+	jp	exit
+;
+err5:	call	eprint
+	db	'Datei kann nicht geschlossen werden',cr,lf,0
+	jr	exit
+;
+err6:	call	eprint
+	db	'Datei ',0
+	ld	de,fcb1+1
+	call	pfn2		; Dateiname anzeigen
+	call	eprint
+	db	' auf USB-Stick nicht vorhanden',cr,lf,0
+	jr	exit
+;
+err7:	call	eprint
+	db	'Unerwartete Vinculum-Antwort',cr,lf,0
+	jr	exit
+;
+err8:	call	eprint
+	db	'TPA-Speicherueberlauf',cr,lf,0
+
+exit:	LD	A,ECS		; Extend. CMD-Modus
+	CALL	put
+	LD	A,CR
+	CALL	put
+	call	condin		; evtl. anstehendes BRK abfangen
+	call	getud		; DU: regenerieren
+	call	deinit		; Treiber deaktivieren
+	rst	0
+
+; Dateidatum anzeigen:
+; PE:	HL	Zeiger auf Datumsfeld im CP/M-Format
+
+danz:	call	eprint
+	db	', ',0
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Tag
+	call	pa2hc
+	ld	a,'.'
+	call	cout
+	dec	hl
+	ld	a,(hl)		; Monat
+	call	pa2hc
+	ld	a,'.'
+	call	cout
+	dec	hl
+	ld	a,(hl)		; Jahr
+	cp	78h
+	ld	a,19h		; Jahrhundert 1978-1999
+	adc	a,0
+	daa			; oder 2000-2077
+	call	pa2hc
+	ld	a,(hl)		; Jahr
+	call	pa2hc
+	ld	a,' '
+	call	cout
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Stunde
+	call	pa2hc
+	ld	a,':'
+	call	cout
+	inc	hl
+	ld	a,(hl)		; Minute
+	call	pa2hc
+	ret
+
+; Verzeichnis einlesen von USB-Stick:
+;
+; PA:	CY=1	Fehler
+
+rd_dir:	call	eprint
+	db	'Scanne Directory, ',0
+	ld	a,dir		; DIR
+	call	put
+	ld	a,cr		; ohne Parameter
+	call	put
+
+	ld	hl,$memry	; Directoryeintraege hier ablegen
+	ld	(pointer),hl	; Zeiger setzen
+	ld	hl,0
+	ld	(count),hl	; Anzahl
+	ld	(count2),hl	; Zaehler
+rd0:	ld	hl,data		; Datenpuffer fuer eine Zeile
+	ld	b,size		; max. Puffergroesse
+rd1:	call	get		; Zeichen holen
+	ret	c		; Fehler
+	ld	(hl),a		; ablegen
+	inc	hl
+	cp	cr
+	jr	z,rd2		; CR erkannt
+	djnz	rd1		; weiter bis Puffer voll ist
+rd2:	ld	hl,data
+	ld	a,(hl)
+	cp	'>'
+	ret	z		; Prompt erkannt -> fertig
+	cp	cr
+	jr	z,rd0		; Leerzeile -> ignorieren
+
+; Eintrag in Puffer kopieren (ohne Verzeichnisse):
+
+	ld	hl,(pointer)	; Verzeichnispuffer
+	ld	de,data		; Datenpuffer
+	ld	a,(de)		; erstes Zeichen testen
+	cp	'.'		; Unterverzeichnis?
+	jr	z,rd0		; weglassen!
+	ld	b,11		; max. Laenge 8.3 (ohne Punkt)
+mov1:	ld	a,(de)
+	inc	de
+	cp	' '		; Trennzeichen Verzeichnisname/DIR ?
+	jr	z,rd0		; weglassen!
+	cp	'.'		; Trennzeichen Dateiname/Typ?
+	jr	nz,mov3
+mov2:	ld	a,b		; noch Zeichenanzahl
+	cp	4		; kleiner als 4?
+	jr	c,mov1		; ja, wir sind richtig
+	ld	a,' '
+	ld	(hl),a		; Leerzeichen einfuegen
+	inc	hl		; ein Zeichen weiter gehen
+	dec	b		; und mitzaehlen
+	jr	mov2
+	;
+mov3:	cp	cr		; fertig?
+	jr	nz,mov4
+	dec	de
+	ld	a,' '		; Rest sind Leerzeichen
+mov4:	ld	(hl),a		; Zeichen ablegen
+	inc	hl
+	djnz	mov1		; wiederholen fuer alle 12 Zeichen
+
+; Test, ob Eintrag der Maske entspricht:
+
+	ld	hl,(pointer)	; abgelegter Dateiname
+	ld	de,fcb1+1	; Maske
+	ld	b,11		; Dateiname+Typ pruefen
+cop1:	ld	a,(de)
+	cp	'?'		; Wildcard in Maske?
+	jr	z,cop2
+	cp	(hl)
+	jr	nz,rd0		; entspricht nicht der Maske!
+cop2:	inc	hl
+	inc	de
+	djnz	cop1
+
+; Test auf Ausschlussliste:
+
+	push	hl
+	ld	hl,excl		; Liste auszuschliessender Dateien
+	ld	c,10		; 10 Dateinamen
+cd1:	ld	de,(pointer)	; neuer Testkandidat
+	ld	b,11		; jeder mit Laenge 8+3
+cd2:	ld	a,'?'
+	cp	(hl)
+	jr	z,cd3		; passt immer
+	ld	a,(de)
+	cp	(hl)
+	jr	nz,cd4		; nicht ausschliessen
+cd3:	inc	hl
+	inc	de
+	djnz	cd2
+	pop	hl
+	jr	rd0		; Datei ausschliessen!
+	;
+cd4:	inc	hl
+	djnz	cd4		; den Rest ignorieren
+	dec	c
+	jr	nz,cd1		; noch einmal testen
+	pop	de
+	ld	(pointer),de	; neuer Zeiger jetzt gueltig
+	ld	hl,(tpaend)
+	sbc	hl,de
+	jp	c,err8		; TPA-Ueberlauf!
+	ld	hl,(count)
+	inc	hl		; Eintraege zaehlen
+	ld	(count),hl
+	jp	rd0		; naechsten einlesen
+
+; eingelesenes Verzeichnis alphabetisch sortieren
+
+; 1. Zeigertabelle erzeugen:
+
+sort:	ld	hl,(pointer)	; Ende der Dateinamen ist
+	ld	(table),hl	; Beginn der Zeigertabelle
+	ld	de,(count)
+	add	hl,de
+	add	hl,de		; + 2 Byte je Eintrag
+	ex	de,hl
+	ld	hl,(tpaend)	; TPA-Ende
+	sbc	hl,de
+	jp	c,err8		; das reicht nicht!
+
+	ld	hl,(count)	; Anzahl Elemente
+	push	hl
+	ld	de,$memry	; Tabelle der Namen
+	ld	hl,(table)	; Zeigertabelle
+	ld	bc,11		; Laenge eines Eintrages
+BLORD:	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ex	de,hl
+	add	hl,bc		; naechstes Element
+	ex	de,hl
+	ex	(sp),hl
+	dec	hl		; noch ein Element?
+	ld	a,h
+	or	l
+	ex	(sp),hl
+	jr	nz,BLORD
+	pop	hl
+	ld	hl,(count)	; Anzahl
+	dec	hl
+	ld	a,h
+	or	l
+	ret	z		; nicht sortieren wenn Anzahl=1
+	ld	hl,option
+	bit	1,(hl)
+	ret	z		; unsortiert abarbeiten
+	call	eprint
+	db	', sortieren',0
+
+;
+; 2. Sortieren ueber Zeiger-Methode
+; (Shell-SORT von "Software Tools", Kernigan/Plaugher, (c) 1976)
+;
+	ld	hl,(count)	; Anzahl Elemente
+	ld	(GAP),hl	; GAP fuer ersten Vergleich initialisieren
+SORT0:	ld	hl,(GAP)
+	srl	h
+	rr	l		; GAP:=GAP/2
+	ld	a,l
+	or	h
+	ret	z		; fertig, wenn GAP/2=0
+	bit	0,l		; GAP ungeradzahlig?
+	jr	nz,SORT1
+	dec	hl		; GAP ungerade machen
+SORT1:	ld	(GAP),hl
+SORT2:	ld	(J),hl		; J:=GAP
+;
+; For (J=GAP+1; J<=N; J=J+1)
+;
+RIGHT:	ld	hl,(J)
+	inc	hl		; J:=J+1
+	ld	(J),hl
+	ex	de,hl		; DE=(J)
+	ld	hl,(count)
+	or	a
+	sbc	hl,de		; Anzahl-J
+	jr	c,SORT0		; neu starten, wenn I > N
+;
+; For (I=J-GAP; J>0; I=J-GAP)
+;
+LEFT:	ld	hl,(GAP)
+	ex	de,hl
+	sbc	hl,de		; I:=J-GAP
+	jr	c,RIGHT		; wenn J < 0
+	jr	z,RIGHT		; wenn J = 0
+;
+; Set JG=I+GAP
+;
+	ex	de,hl
+	add	hl,de		; JG:=I+GAP
+;
+; If (I) <= (JG) then Break else Exchange
+;
+	push	hl
+	push	de
+	call	COMPAR		; Vergleich
+	pop	de
+	pop	hl
+	jr	z,RIGHT		; Dateiname gleich (sollte nicht vorkommen!)
+	jr	nc,RIGHT	; richtig sortiert
+	push	de
+	call	SWAP		; Austausch
+	pop	de
+	jr	LEFT		; zurueck furr weitere Tests
+;
+; Zeiger zweier Elemente austauschen
+; PE:	HL,DE	Nummer der Elemente
+; VR:	AF,BC,DE,HL
+;
+SWAP:	ld	bc,(table)	; Adresstabelle
+	dec	bc
+	dec	bc
+	add	hl,hl		; *2
+	add	hl,bc		; 1. Element
+	ex	de,hl
+	add	hl,hl		; *2
+	add	hl,bc		; 2. Element
+	call	SWAP1		; erst aufrufen, dann reinlaufen
+SWAP1:	ld	c,(hl)
+	ld	a,(de)
+	ex	de,hl
+	ld	(hl),c
+	ld	(de),a
+	inc	hl
+	inc	de
+	RET
+;
+; Zwei Eintraege ueber deren Zeiger vergleichen
+; PE:	HL,DE	Nummer der Elemente
+; PA:	CY=1	(HL) > (DE)
+;	Z=1	Namen gleich, dann
+;		CY'=1	(HL) > (DE) bei Vergleich der EXT-Nummer
+; VR:	AF,BC,DE,HL
+;
+COMPAR:	ld	bc,(table)	; Adresstabelle
+	dec	bc
+	dec	bc
+	add	hl,hl		; *2
+	add	hl,bc		; 1. Element
+	ex	de,hl
+	add	hl,hl		; *2
+	add	hl,bc		; 2. Element
+	ex	de,hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)		; BC ist Adresse des ersten Elements
+	ex	de,hl
+	ld	e,c
+	ld	d,b		; DE ist Adresse des ersten Elements
+	ld	c,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,c		; HL ist Adresse des zweiten Elements
+	ld	b,11		; Anzahl Zeichen 8.3
+CMPLE:	ld	a,(de)
+	cp	(hl)		; Vergleich
+	inc	de
+	inc	hl
+	ret	nz		; Ende, sobald ungleich
+	djnz	CMPLE
+	ret
+
+	prozent			; Fortschrittsanzeige aus USBINC einbinden
+
+; Datenbereich:
+
+	DSEG
+drive:		db	0	; Kopie von Laufwerk aus FCB1+0
+user:		db	0	; Kopie von User aus FCB1+13
+wild:		db	0	; mehrdeutiger Dateiname?
+fsize:		db	0	; Blockgroesse (128 oder weniger)
+filesize0:	dw	0,0	; Dateigroesse in Byte
+filesize:	dw	0,0	; Dateigroesse in Byte - Laufvariable
+kbyte:		dw	0	; Dateigroesse in KByte
+stempel:	db	0	; Datumstempel vorhanden?
+size	equ	30		; Puffergroesse
+data:		ds	size,0	; Datenpuffer fuer DIR und DIRT
+
+Datum1:		DS	5,0	; Erstellt-Datum im CP/M-Format (BCD)
+Datum2:		DS	5,0	; Zugriff-Datum - bleibt Null!
+Datum3:		DS	5,0	; Modify-Datum im CP/M-Format (BCD)
+JAHR	equ	Datum3
+MONAT	equ	Datum3+1
+TAG	equ	Datum3+2
+STUNDE	equ	Datum3+3
+MINUTE	equ	Datum3+4
+Datum4:		DS	15,0	; zweites Datumsfeld fuer vorhandene CP/M-Datei
+pointer:	dw	0	; Zeiger Verzeichnispuffer
+count:		dw	0	; Anzahl Dateien
+count2:		dw	0	; Zaehler fuer uebertragene Dateien
+counter:	dw	0	; laufende Nummer
+table:		dw	0	; Zeiger auf Beginn der Zeigertabelle (Sort)
+GAP:		dw	0	; Variable fuer SORT
+J:		dw	0	;	"	"
+
+tpaend:		dw	0	; nutzbare TPA-Endadresse
+	END

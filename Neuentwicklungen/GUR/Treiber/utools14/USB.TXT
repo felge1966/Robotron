@@ -1,0 +1,83 @@
+Hinweis zu den Quelltexten der UTools V1.4 (03.05.2011)
+-------------------------------------------------------
+
+Das Programmpaket UTOOLS 1.4 wurde speziell fuer den KC85 entwickelt.
+Voraussetzung: CP/M-kompatibles Betriebssystem (MicroDOS, ZSDOS, NZCOM)
+Lauffaehig auf den Geraeten D004 und D008, bei der D008 wird automatisch die
+eingestellte CPU-Taktfrequenz erkannt und beruecksichtigt.
+
+Hinweis zur Anpassung auf anderen CP/M-Systemen:
+Der KC85 stellt unter CP/M ein 2-Prozessorsystem dar.  Ein Prozessor fuehrt CP/M 
+aus und hat direkten Zugriff auf die Diskettenlaufwerke sowie die Festplatte 
+(GIDE-Interface).  Der zweite Prozessor im KC-Grundgeraet dient als "Terminal" 
+und realisiert die Funktionen der Ein/Ausgaben (Bildschirm, Tastatur, Drucker, 
+V.24-Schnittstelle).  Die Erweiterungsmodule des KC-Systems werden ebenfalls in 
+den Adressbereich dieses Prozessors eingeordnet.  Der Datenaustausch zwischen 
+den beiden Prozessoren geht ueber einen so genannten Koppel-RAM, auf den beide 
+Prozessoren zugreifen koennen und laeuft unter CP/M ueber Treiber ab.
+
+Das VDIP1 bzw. VDIP2 wird an einem PIO angeschlossen, dazu sind beide Ports 
+erforderlich.  Beim KC85 ist das Modul M001 "Digital In/Out" dazu geeignet.  
+Das speziell entwickelte Modul M052 enthaelt neben weiteren Komponenten 
+ebenfalls eine PIO und daran das VDIP2.
+Fuer die Nutzung unter CP/M ist am KC85 ein Treiber noetig, der den Zugriff 
+steuert und diese Funktionen dem CP/M-System hinzufuegt.  Dazu wird die Funktion 
+der Zusatzein- und ausgabe genutzt.  Als dritte Funktion ist eine Statusabfrage 
+realisiert, wozu eine per Interrupt beschriebene Speicherzelle definiert wurde.
+
+Die Nachnutzung auf CP/M-Systemen, bei denen das VDIP1 bzw. VDIP2 an einem PIO 
+im Adressraum des CP/M-Prozessors erfolgt, gestaltet sich wesentlich einfacher. 
+Hierzu muss nur im Quelltext USBINC.Z80 der Schalter KC85 von 1 auf 0 gesetzt 
+werden. Danach sind noch folgende Parameter anzupassen:
+- die Portadressen des verwendeten PIO.
+- Die Bildschirmbreite, voreingestellt ist der Wert 64 (Beim KC85 sind es 80
+  Zeichen Breite). Andere Werte sind zur Zeit nicht vorgesehen.
+- Die CPU-Taktfrequenz im MHz (Werte zwischen 1 und 32 sind hier moeglich)
+
+Die CP/M-Variante wurde erfolgreich am AC1 getestet!
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+Folgende Funktionen sind mit den UTools 1.4 realisiert:
+
+- USB <Direktkommando ...>, z.B.:
+  USB CD <verzeichnis>		Laufwerk wechseln
+  USB DLD <verzeichnis>		Verzeichnis loeschen
+  USB MKD <verzeichnis>		Verzeichnis anlegen
+  USB DLF <dateiname>		Datei loeschen
+  USB FS				Freien Platz anzeigen
+  USB IDD				Disk-Informationen anzeigen
+  USB FWV				Firmware-Version anzeigen
+
+- UDIR <maske> opt		gefilterte, maskierte Verzeichnisanzeige
+
+- UGET <dir:maske> opt		Datei(en) lesen
+
+- UPUT <dir:maske> opt		Datei(en) schreiben
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+Erweiterungen der Version 1.1:
+ - Fortschrittsanzeige in Prozent, wahlweise mit fortlaufenden Zeichen
+ - Erkennung von schreibgeschuetzten Dateien
+ - Optimierung der Synchronisation
+ - Umstellung auf geaenderten Schaltplan, jetzt interruptfaehig
+
+Erweiterungen der Version 1.2:
+ - Anpassung fuer Vinculum-Firmware 3.66
+ - Moeglichkeit des Datumsvergleichs (bei ZSDOS-Datumsstempel unter CP/M)
+ - Programmkonfiguration mittels ZCNFG.COM und CFG-Datei
+ - DRV-Treiber fuer M001 und M052
+ - Vorbereitung fuer andere CP/M-Systeme im Quelltext USBINC.Z80
+ - 5 verbotene Zeichen '\/"|+' im CP/M-Dateinamen konvertieren zu '_'
+
+Erweiterungen der Version 1.3:
+ - Fehlerkorrektur fuer Nicht-KC85-Systeme
+ - Anpassung UDIR fuer Bildschirmbreite mit 64 Zeichen (z.B. AC1)
+
+Erweiterungen der Version 1.4:
+ - Optimierung der Synchronisationsroutine und Anpassung an CPU-Taktfrequenz
+ - Erweiterung der CFG-Datei zur Einstellung der CPU-Taktfrequenz
+
+
+Viel Spass bei der Nachnutzung wuenscht Mario Leubner (KC-Club)

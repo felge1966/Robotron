@@ -1,0 +1,30 @@
+TITLE           Generic IDE GAL IC2
+PATTERN         01
+REVISION        02
+AUTHOR          Tilmann Reh
+COMPANY         AutoMeter
+DATE            26.09.1995
+
+CHIP GIDE2 PALCE20V8
+
+a7 a6 a0 a4 a1 a2 a3 ja7 a5 ja6 ja5 gnd
+ja4 /exp /sel /selq /cs0 /cs1 ia0 ia2 ia1 /rtc /iorq vcc
+
+SIGNATURE TR-GIDE2
+
+EQUATIONS
+
+sel = (a4*ja4+/a4*/ja4)*(a5*ja5+/a5*/ja5)
+     *(a6*ja6+/a6*/ja6)*(a7*ja7+/a7*/ja7)       ; address comparator
+
+selq = sel * iorq * (a3+a2)                     ; interface access x4..xF
+
+ia0 = a0
+ia1 = a1
+ia2 = a2                                        ; signal buffering
+
+; exp = sel * iorq * /a3 * a2 * /a1 * /a0         ; x4 (22V10 only)
+rtc = sel * iorq * /a3 * a2 * /a1 * a0          ; x5
+cs1 = sel * /a3 * a2 * a1                       ; x6, x7
+cs0 = sel * a3                                  ; x8..xF
+

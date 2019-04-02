@@ -1,0 +1,118 @@
+
+PALASM90  PAL ASSEMBLER   - MARKET RELEASE (2-14-90)
+ (C) - COPYRIGHT ADVANCED MICRO DEVICES INC., 1990
+
+
+TITLE   :Generic IDE GAL IC1      AUTHOR :Tilmann Reh              
+PATTERN :01                       COMPANY:AutoMeter                
+REVISION:02                       DATE   :26.09.1995               
+
+PAL16V8
+GIDE1
+
+                   11  1111  1111  2222  2222  2233  
+     0123  4567  8901  2345  6789  0123  4567  8901  
+
+0    ----  ----  ----  ----  ----  ----  ----  ----    
+1    ----  ----  ----  -X--  ----  X---  ----  -X--    
+2    ----  ----  ----  ----  ----  X---  -X--  -X--    
+3    XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+4    XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+5    XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+6    XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+7    XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+
+8    ----  ----  ----  ----  ----  ----  ----  ----    
+9    -X--  X---  -X--  -X--  -X-X  X---  ----  -X--    
+10   -X--  X---  -X--  ----  -X-X  X---  -X--  -X--    
+11   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+12   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+13   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+14   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+15   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+
+16   ----  ----  ----  ----  ----  ----  ----  ----    
+17   -X--  ----  -X--  ----  -XX-  X---  -X--  -X--    
+18   -X--  ----  -X--  -X--  -XX-  X---  ----  -X--    
+19   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+20   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+21   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+22   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+23   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+
+24   ----  ----  ----  ----  ----  ----  ----  ----    
+25   ----  ----  X---  -X--  X---  ----  ----  -X--    
+26   ----  ----  X---  -X--  ----  X---  ----  -X--    
+27   ----  ----  ----  -X--  X---  X---  ----  -X--    
+28   ----  ----  ----  -X--  --X-  X---  ----  -X--    
+29   X---  ----  ----  -X--  ----  X---  ----  -X--    
+30   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+31   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+
+32   -X--  ----  -X--  ----  -X-X  ----  ----  ----    
+33   ----  ----  ----  ----  ---X  -X--  ----  ----    
+34   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+35   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+36   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+37   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+38   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+39   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+
+40   ----  ----  ----  ----  ----  ----  ----  ----    
+41   ----  ----  ----  X---  ----  ----  X---  ----    
+42   ----  ----  -X--  ----  ----  -X--  ----  ----    
+43   ----  ----  ----  ----  -X--  -X--  ----  ----    
+44   -X--  ----  -X--  X---  -XX-  ----  ----  ----    
+45   -X--  ----  -X--  ----  -X-X  ----  X---  ----    
+46   ----  ----  ----  ----  ----  ----  ----  X---    
+47   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+
+48   ----  ----  ----  ----  ----  ----  ----  ----    
+49   ----  ----  ----  ----  ----  ----  -X--  X---    
+50   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+51   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+52   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+53   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+54   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+55   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+
+56   ----  ----  ----  ----  ----  ----  ----  ----    
+57   ----  ----  X---  ----  X---  ----  -X--  -X--    
+58   ----  ----  X---  ----  ----  X---  -X--  -X--    
+59   ----  ----  ----  ----  X---  X---  -X--  -X--    
+60   ----  ----  ----  ----  ---X  X---  -X--  -X--    
+61   X---  ----  ----  ----  ----  X---  -X--  -X--    
+62   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+63   XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX  XXXX    
+
+ SUMMARY
+ -------
+
+      OUTPUT PINS:           11111111
+                             23456789
+    POLARITY FUSES:          XX--XXXX
+
+      OUTPUT PINS:           11111111
+                             23456789
+    SL0 FUSES:               ---X----
+
+      OUTPUT PINS:           11111111
+                             23456789
+    PTERM DIS. FUSES:        --------
+    PTERM DIS. FUSES:        --------
+    PTERM DIS. FUSES:        --------
+    PTERM DIS. FUSES:        --------
+    PTERM DIS. FUSES:        --------
+    PTERM DIS. FUSES:        --------
+    PTERM DIS. FUSES:        --------
+    PTERM DIS. FUSES:        --------
+
+    SG0 FUSE:                X
+
+    SG1 FUSE:                -
+
+    SIGNATURE FUSES:         XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                             XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+      TOTAL FUSES BLOWN    = 997
+
