@@ -1,0 +1,28 @@
+title    K1520 Netzwerk
+pattern  GATES
+revision A
+author   Gr„mer
+date     21.04.2010
+
+
+CHIP GATES GAL16V8
+
+
+;pin   1     2     3     4      5     6     7         8      9      10
+       WR    AB12  AB11  AB10   AB15  BTB   CS_EEPROM RDY    RESET  GND
+
+;pin   11    12    13    14     15    16    17        18     19        20
+       MREQ  Q2    Q     KCLTS NC6    NC5   AB13      AB14   MEMDILTS  VCC
+
+@UES U11
+
+equations
+
+/Q     = KCLTS + /AB10 * AB11 * AB12 * AB13 * AB14 * AB15 * /MREQ * /WR + /RESET + BTB
+
+/KCLTS = Q + AB10 * AB11 * AB12 * AB13 * AB14 * AB15 * /MREQ * /WR
+
+
+/Q2       = MEMDILTS + /CS_EEPROM * RDY 
+
+/MEMDILTS = Q2 + /RESET + /MREQ * /RDY

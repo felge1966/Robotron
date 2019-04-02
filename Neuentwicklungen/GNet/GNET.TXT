@@ -1,0 +1,408 @@
+================================================================================
+	GNET - Generisches Z80 Netzwerk-Interface (TCP/IP an Ethernet)
+================================================================================
+
+(c) 2010 Enrico Graemer & Ralf Kaestner
+
+Technische Beschreibung (Stand: November 2011)
+
+
+1. Einleitung
+
+Das GNET ist eine Abwandlung der allgemeinen "KCNet"-Schaltung, aus der 
+auch das KC85/x-Modul M052, sowie die Netzwerkkarte "K1520Net" fuer Z80-Rechner
+mit dem "robotron"-Bus K1520 entwickelt worden sind.
+
+Die mechanische Konstruktion des GNET wurde an das bekannte GIDE (Copyright 1995
+by Tilmann Reh) der KC-Club Edition angelehnt. Die CPU des Z80-Systems wird
+gesockelt und das GNET anstelle des Z80-Prozessors in die entsprechende
+Fassung gesteckt. Auf dem GNET befindet sich wiederum eine zweite Fassung, 
+welche den originalen Z80-Prozessor aufnimmt. Beide Bausaetze sind kompatibel,
+so dass sie auch uebereinander gesteckt und gleichzeitig betrieben werden 
+koennen. Alle Montageoptionen, welche in der Originalbeschreibung zum GIDE in
+Abschnitt 2 der Datei GIDE.TXT beschrieben werden, treffen sinngemaess auch auf
+das GNET zu.
+
+
+2. Systemvoraussetzungen
+
+Um das GNET verwenden zu koennen, wird ein System mit Z80-CPU im DIP-Gehaeuse
+und vier freien aufeinanderfolgenden I/O-Adressen benoetigt. Die Basisadresse
+laesst sich mit den Jumpern JA2 bis JA7 im Standard-I/O-Bereich von 000H bis
+0FCH einstellen. Wenn alle Jumper geoeffnet sind, hat das Interface die Adresse
+000H. Sind alle Jumper geschlossen, ist die Adresse 0FCH eingestellt.
+
+Die Standard-I/O-Adresse des GNET ist 0C0H (JA7-6 geschlossen/JA5-2 geoeffnet).
+Sie sollte auch fuer das eigene System gewaehlt werden, wenn sie dort noch nicht
+verwendet wird. Man hat dann bei der Inbetriebnahme keine weitere Arbeit mit den 
+CP/M-Programmen (s.u.), da es fuer diese Adresse ein bereits uebersetztes und
+damit sofort einsetzbares CP/M-Softwarepaket gibt. 
+
+Das GNET ist fuer den Betrieb in einer Z80 Interrupt-Kette ("daisy-chain")
+vorbereitet. Z.z. wird diese Funktionalitaet allerdings von der Software noch
+nicht benoetigt. Der Systemtakt des Rechners darf nicht mehr als 10 MHz 
+betragen. Diese Obergrenze wird von den verfuegbaren Z80-PIO's vorgegeben, 
+welche sonst uebertaktet und auch zerstoert werden koennen. 
+
+Die vorhandene Treiber-Software kann fuer beliebige Z80 Systeme verwendet
+werden. Sofort lauffaehige Anwendungsprogramme stehen fuer CP/M kompatible 
+Betriebssysteme der Version 2.x und hoeher zur Verfuegung. Alle Z80-Quellen 
+(M80-Assembler) sind offengelegt und koennen von http://susowa.homeftp.net
+heruntergeladen werden. Die aktuelle Version findet man im Downloadbereich unter
+"KCNet Quelltexte Monat/Jahr".
+
+Fuer die Standard-I/O-Adresse 0C0H des GNET gibt es auf der gleichen Webseite
+ein bereits uebersetztes CP/M-Programmpaket, welches sofort fuer die 
+Inbetriebnahme des GNET verwendet werden kann. Die aktuelle Version findet man
+im Downloadbereich unter "KCNet Software Monat/Jahr fuer ZPIO".
+
+Da das Interface ohne Software nicht in Betrieb genommen werden kann, muss man
+in der Lage sein, diese Programme fuer sein CP/M-System ladbar zu machen. Ein 
+Transfer auf eine CP/M-Diskette kann beispielsweise mit Hilfe einer vorhandenen 
+seriellen Schnittstelle und geeigneter DFUe-Software erfolgen. Eine weitere
+Moeglichkeit ist der Einsatz anderer CP/M-Rechner, welche das eigene CP/M-Format
+schreiben und PC-Disketten zumindest lesen koennen. Man kann den Transfer auch
+direkt auf einem PC und dessen Diskettenlaufwerken mit Hilfe geeigneter
+Werkzeuge durchfuehren.
+
+Fuer eine vollstaendige Kompatibilitaet von Hard- bzw. Software des GNET und 
+verwendetem Z80-System kann keine Garantie uebernommen werden. Die zuverlaessige
+und stoerungsfreie Funktion der Interface-Hardware am Z80-Systembus des eigenen
+Systems muss durch den Anwender gewaehrleistet werden. Da Terminal-Kodes fuer
+die Ein- und Ausgaben unter CP/M nicht standardisiert sind, kann es zu 
+Stoerungen oder Fehlfunktionen bei Tastatureingaben und/oder Bildschirmausgaben
+kommen. In solchen Faellen muss der Anwender die Quellen an das eigene 
+CP/M-System anpassen und die Programme noch einmal neu uebersetzen. Das ist 
+ebenfalls notwendig, wenn das Interface auf einer von der Standard-I/O-Adresse
+abweichenden Adresse betrieben werden soll.
+
+Detaillierte Hintergrund-Informationen zum Netzwerk-Projekt "KCNet" kann man im
+Projektbereich der o.g. Webseite finden. Mit Hilfe der Suchfunktion und
+passenden Stichworten findet man jede Menge weiteres Material und Hilfestellung
+zu den Themen Netzwerk und den CP/M-Netzwerkprogrammen. Im Downloadbereich gibt
+es darueber hinaus diverse Schaltplaene und andere Unterlagen, welche im Laufe
+der Zeit entstanden sind.
+
+
+3. Interface-Beschreibung
+
+Um ein universelles Timing und eine moeglichst hohe Hardware-Kompatibilitaet
+fuer diverse Z80-Busse gewaehrleisten zu koennen, erfolgt die Anbindung des
+verwendeten Netzwerkmodules "WIZnet 810MJ" per Z80-PIO. 
+
+Das Netzwerk-Modul enthaelt einen Hardware-TCP/IP-Stack, welcher intern an einem
+integrierten Ethernet-Controller angeschlossen ist. Aktuelle Informationen zum 
+WIZnet-Modul sind beim Hersteller unter http://www.wiznet.co.kr zu finden. Mit
+Hilfe eines transparent arbeitenden AVR-Controllers kann das Z80-System ueber
+die Z80-PIO auf die Speicheradressen des WIZnet-Modules schreibend und lesend 
+zugreifen und dadurch den TCP/IP-Stack frei programmieren.
+
+Jeder Ethernet-Netzwerk Teilnehmer muss im Besitz einer weltweit einmaligen 
+MAC-Adresse sein, welche damit auch fuer jedes GNET-Exemplar zur Verfuegung
+stehen muss. Um einen GNET-Bausatz zu erhalten, muss der Anwender pro Exemplar 
+eine gueltige MAC-Adresse bei Bestellung liefern, welche man beispielsweise von
+einer alten oder auch neuen PC-Netzwerkkarte uebernehmen kann. Diese Karte
+sollte anschliessend unbrauchbar gemacht werden, um die Einmaligkeit der 
+MAC-Adresse sicherzustellen!
+
+Eine gelieferte MAC-Adresse wird in der individuellen Firmware fuer den 
+AVR-Controller des Bausatzes unveraenderlich gespeichert, so dass man sich als 
+GNET-Anwender nicht mehr damit befassen muss. Fuer die Generierung einer
+Firmware sind weitere Angaben erforderlich, welche bei Bausatz-Bestellungen
+anzugeben sind und auf http://susowa.homeftp.net nachgelesen werden koennen:
+
+Projekte -> KCNET -> Nachnutzung: Voraussetzungen fuer den Bezug der Firmware
+
+Da es Rechner gibt, bei denen zwischen CPU und der restlichen Hardware 
+Bustreiber geschaltet sind, wird das Signal /RD der CPU in Richtung Z80-Sockel
+des Rechner-Boards maskiert (J7 Signal /RDQ). Ansonsten wuerde es beim
+Lesezugriff auf das GNET zu Datenkollisionen zwischen GNET und den Bustreibern
+des Rechners kommen. Diese Funktion ist mit J4 und dessen Leiterbahnverbindung
+zwischen Anschluss 1 und 2 bereits fest vorgegeben. Wer die CPU nicht ausloeten
+und auf das GNET setzen moechte oder anderweitige Gruende hat, muss diese
+Leiterbahn unterbrechen und eine Bruecke zwischen Anschluss 2 und 3 von J4
+setzen.
+
+Das GAL U1 dekodiert die mit Hilfe von JA2-7 eigestellten I/O-Adressen des GNET
+und ermoeglicht damit den Zugriff auf die Interface-Hardware. Die LED D3 auf der
+1. Schaltplanseite zeigt den Zugriff auf die PIO an.
+
+Im Moment wird eine Einbindung der Schaltung in die Interrupt-Kette
+("daisy-chain") des Z80-Bus nicht benoetigt, da die Treiber und Programme keine 
+Interrupts verwenden. Um definierte Pegel zu gewaehrleisten wird IEI (J5) mit
++5 Volt auf der Bestueckungsseite verbunden.
+
+Die sonstige Beschaltung der Z80-PIO und alle Schaltungsbestandteile, welche an
+den PIO-Ports angeschlossen sind, entsprechen der originalen Schaltung und
+werden in den Projektartikeln zum "KCNet" naeher beschrieben. 
+
+Bestandteil des Bausatzes ist eine kleine Zusatzplatine, welche 2 Funktionen
+bzw. Aufgaben hat. Um eine oder beide Funktionen benutzen zu koennen, muss 
+allerdings die RJ45-Buchse aus dem WIZnet-Modul heraus- und in den Bestueckplatz
+der Zusatzplatine wieder eingeloetet werden. Fuer die richtige Funktion des
+Interface ist das nicht zwingend erforderlich!
+
+Durch den Umbau werden die integrierten LED's der RJ45-Buchse ueber die danach
+wirksamen U7-Gatter auf der 2. Schaltplanseite anders angesteuert. Die gruene
+LED leuchtet dauerhaft, wenn das Netzwerkmodul einen Ethernet-Link feststellt
+und die gelbe LED blinkt, wenn Daten uebertragen werden. Ohne diesen Umbau zeigt
+eine leuchtende gruene LED eine bestehende Vollduplexverbindung an und eine
+leuchtende gelbe LED einen Ethernet-Link. Wenn Daten uebertragen werden, blinkt
+die gelbe LED zusaetzlich.
+
+Ein Versetzen der RJ45-Buchse auf die Zusatzplatine ist in dem Fall notwendig,
+wenn man nach dem Einbau des GNET in den Rechner keinen Zugriff mehr von aussen
+hat, also nach dem Schliessen des Rechnergehaeuses das Netzwerkkabel nicht mehr
+an- bzw. abstecken koennte. Die kleine Platine laesst sich unabhaengig von der
+GNET-Montage im Rechner an einer beliebigen, von aussen zugaengigen Stelle
+befestigen. GNET- und Zusatzplatine werden dann innerhalb des Rechners laut
+Anleitung in Abschnitt 4 verbunden.
+
+Mit Hilfe von U9 und den daran angeschlossenen Bauteilen auf Schaltplanseite 2
+wird das Debug-Interface der AVR-Firmware mit normgerechten RS232-Pegeln zur
+Verfuegung gestellt. Dieser Schaltungsteil ist fuer die reine Funktion des
+Interface ebenfalls nicht zwingend erforderlich. Man sollte diese Bauteile aber 
+fuer Diagnosezwecke immer mit bestuecken, falls es bei der Inbetriebnahme oder
+spaeter zu Problemen kommt. Fuer die Aus- bzw. Eingabe von Debug-Informationen
+benoetigt man ein beliebiges Terminal an RS232 (9600 Baud, 8 Datenbits, keine
+Paritaet, 1 Stoppbit, keine Flusskontrolle). "RxD" von J9 (Pin 3) wird mit "TxD"
+des Debug-Senders, "TxD" von J9 (Pin 1) mit "RxD" des Debug-Empfaengers und GND
+von J9 (Pin 2) mit Masse des Debug-Terminals verbunden. Die Testmoeglichkeiten
+und der Umgang mit dem Debug-Interface werden in den Projektartikeln zum "KCNet"
+auf http://susowa.homeftp.net ausfuehrlich beschrieben:
+
+Projekte -> KCNET -> Aufbau und Inbetriebnahme: Debugger
+
+	oder noch detaillierter im englischen Teil
+
+KCNet -> Hardware: Debug-Terminal
+
+Die Hinweise zum RS232-Verbindungskabel in den beiden Artikeln beziehen sich auf
+die originale "KCNet"-Platine und nicht auf das GNET. Ein Kabel fuer das GNET
+wird nur funktionieren, wenn es wie oben beschrieben verbunden wird!
+
+
+4. Montage
+
+Der Aufbau des Bausatzes sollte fuer einen Elektronik-Bastler problemlos 
+moeglich sein, wenn man sich Zeit laesst und gewissenhaft arbeitet. Bis auf U5 
+und U9 mit angeschlossenen Bauteilen werden nur THT-Bauteile verwendet. Bei 
+Loetarbeiten am Netzwerkmodul sollte man besonders sorgfaeltig vorgehen, da es
+verhaeltnismaessig teuer in der Wiederbeschaffung ist!
+
+Man beginnt zweckmaessigerweise mit den niedrigeren Bauteilen, zuerst wird also
+der Spannungsregler U5 im SMD-Gehaeuse aufgeloetet.
+
+Danach kommt die Carrier-Fassung fuer U3 an die Reihe. Um einzelne Buchsen zu 
+erhalten, zerteilt man eine 28-polige Praezisions-IC-Fassung. Von den Buchsen 
+werden die Anschlussdraehte abgekniffen, siehe Bild "Montage 1". Beim Einloeten
+dieser Buchsen sollte man sparsam mit Loetzinn umgehen, da es sonst schnell in 
+die Buchsen hineinlauft und diese verstopft. Fuer das WIZnet Netzwerk-Modul
+benoetigt man fuenf weitere Buchsen, welche laut Bild "Montage 2" in die 
+GNET-Platine eingeloetet werden.
+
+Dann werden alle Bauteile unter den IC's, die Fassungen fuer die DIP-IC's und
+die beiden Fassungen im 2 mm Raster fuer das WIZnet Netzwerk-Modul bestueckt.
+
+Anschliessend hat man durch die Fassungen eine nahezu gerade Auflageflaeche zum
+Aufloeten von U9 und seinen Bauteilen (C4-C7, C21 und C22) auf der Rueckseite
+der Leiterplatte. Wenn man das Debug-Interface bestuecken will, dreht man an
+dieser Stelle die Platine um und verloetet die SMD-Bauteile auf der Unterseite.
+
+Zum Schluss werden die restlichen Bauteile und Fassungen verarbeitet. An letzter
+Stelle sind die 20-poligen SIL-Steckadapter J7 von unten zu stecken und zu 
+verloeten. Die dicken Pins werden in die GNET-Leiterplatte geloetet, die duennen
+Pins werden spaeter in den CPU-Sockel der Rechner-Platine gesteckt. Wenn J7 kein
+zweireihiger Adapter ist, sondern aus zwei einzelnen Adapterleisten besteht,
+dann sollten diese zum Ausrichten waehrend des Loetens in eine passende 
+zweireihige Fassung gesteckt werden.
+
+Als Alternative zum SIL-Steckadapter steht fuer beschraenkte Platzverhaeltnisse
+auch noch die Kabeloption zur Verfuegung (siehe Beschreibung zum GIDE). In 
+diesem Fall ist statt der Steckadapter eine zweireihige 40-polige Pfostenleiste
+von der Loetseite her unter die CPU-Fassung zu loeten. Auf die eine Seite des
+Flachbandkabels wird die Pfostenbuchse und auf die andere Seite der 
+DIL-Steckadapter gequetscht. Das Kabel sollte moeglichst kurz sein! 
+
+Der schwierigste Abschnitt beim Aufbau des Bausatzes ist die ev. notwendige 
+Versetzung der RJ45-Buchse vom WIZnet Netzwerk-Modul auf die kleine 
+Zusatzplatine.
+
+Die Buchse laesst sich am besten mit einem eher heissen Loetkolben und 
+Entloetlitze aus der Modul-Leiterplatte ausloeten. Sollten sich die Anschluesse
+nicht gleich vom Loetzinn befreien lassen, kann man noch einmal mit normalem
+bleihaltigen Lot (niedrigerer Schmelzpunkt) nachloeten und dann die Loetaugen
+wieder mit der Entloetlitze freisaugen. Die Anschlussdraehte bleiben mitunter,
+trotz sichtbar freier Bohrung, noch an der Bohrungsinnenwand kleben. Man kann
+sie dann vorsichtig mit einem kleinen Schraubenzieher hin und her bewegen, bis
+sie frei sind, siehe Bild "Montage 3". Wenn alle Pins frei sind, kann man die
+Buchse ohne Gewalt von der Platine hebeln. Hierbei muss aber wirklich mit
+aeusserster Vorsicht vorgegangen werden, da sonst die Multilayer-Platine des
+Netzwerk-Modules beschaedigt werden kann.
+
+Damit das Netzwerkmodul ohne RJ45-Buchse auf der GNET-Platine steckbar bleibt,
+loetet man fuenf einzelne SIL-Steckadapter in die Platine des Netzwerk-Modules,
+welche als Steckverbinder fuer die oben bereits verloeteten Buchsen auf der
+GNET-Leiterplatte dienen, siehe Bild "Montage 4".
+Die duenneren Stifte der SIL-Steckadapter kommen nach unten in die Buchsen auf
+der GNET-Platine. Zur Fuehrung werden die SIL-Steckadapter wie auf dem Bild in
+die Buchsen der GNET-Platine gesteckt. Dann wird das WIZnet-Modul ohne 
+RJ45-Buchse von oben aufgesteckt, eingefaedelt und die SIL-Steckadapter auf der
+Oberseite des Netzwerk-Modules verloetet.
+
+Die ausgeloetete RJ45-Buchse des Netzwerk-Modules kommt zusammen mit C19 und C20
+auf die kleine Zusatz-Platine.
+
+Abschliessend muessen GNET und Zusatz-Platine noch mit einem maximal 50 cm 
+langen Kabel verbunden werden. Um die sichere Funktion des Netzwerk-Interface
+nicht zu beeintraechtigen, ist die Verwendung von verdrillten Aderpaaren im
+Kabel zwingend erforderlich. Die einzelnen Anschluesse sind entsprechend der 2. 
+Schaltplanseite zu verpaaren und dem Platinenaufdruck entprechend 1:1 zu 
+verdrahten. Praedistiniert als Spender fuer das Verbindungskabel sind flexible
+Netzwerk-Patchkabel, wo man sich ein passendes Stueck fuer das GNET abschneiden
+kann.
+
+Ein fertig aufgebautes GNET Netzwerk-Interface kann man beispielhaft in Bild
+"Montage 5" sehen. Das Bild "Montage 6" zeigt ein eigebautes GNET-Modul im
+Kleincomputer KC87. Im Bild "Montage 7" wird der KC87 im Dauertest unter CP/M
+gerade als TCP-Echoserver vom PC aus mit Daten befeuert und darf stundenlang
+keinen einzigen Uebertragungsfehler machen!
+
+
+5. Inbetriebnahme
+
+Wenn man die Hardware zusammengebaut und gruendlich auf richtige Bestueckung, 
+Unterbrechungen, Loetfehler, Kurzschluesse u.s.w. kontrolliert hat, sollte man
+beim ersten Einschalten die Stromaufnahme der Gesamtschaltung nachmessen und
+sofort wieder abschalten, falls dieser Wert wesentlich hoeher als 250 mA liegt.
+
+Wenn das stimmt, kann man nun gleich noch wichtige Eckdaten der Schaltung
+kontrollieren, wie zum Beispiel:
+
+- +5V an allen IC's laut Schaltplan
+- +3,3V an Pin 1 des WIZnet Netzwerk-Modules
+- an Pin 9 des ATmega muss High-Pegel messbar sein, sonst kann er nicht booten
+- falls moeglich, die 8 MHz an Pin 18/19 des ATmega mit einem Oszilloskop
+  kontrollieren
+
+Falls einer dieser Pruefpunkte nicht den genannten Messwert hat, braucht man
+nicht weiterzumachen - das Interface wird nicht funktionieren. Also alles
+ausschalten, Fehler suchen und beseitigen. Wenn alles stimmt, sollte der
+AVR-Controller auch arbeiten und das Firmwareprogramm bereits laufen, was man
+sich mit Hilfe des Debug-Interface anschliessend auch ohne Z80-System anschauen
+kann (siehe Abschnitt 3).
+
+Waren alle Vortests erfolgreich, kann man das Interface in seinen Rechner 
+einbauen und anschliessend noch einmal mit Hilfe des Debug-Interface einen
+Funktionstest durchfuehren, das muss genauso funktionieren wie vor dem Einbau.
+
+Als naechstes kann man sich mit der CP/M-Software befassen, welche man wie oben
+beschrieben, auf seinen eigenen Rechner uebertragen muss. Wenn man das GNET auf
+der Standard-Adresse betreiben kann, ist der folgende Schritt nicht notwendig.
+
+Wenn die GNET-Basisadresse 0C0H nicht verwendet werden kann, muss die
+gewuenschte Adresse in der Konfigurationsdatei KCNET.INC im Abschnitt System
+eingetragen und das Symbol KC85 auf NO geaendert werden. Anschliessend muss das
+komplette Softwarepaket neu assembliert und gelinkt werden. In den Dateien
+MAKE-DR.SUB (mit LINK131.COM) bzw. MAKE-MS.SUB (mit L80.COM) stehen die Befehle
+fuer den Uebersetzungsvorgang, welchen man mit Hilfe von SUBMIT.COM ausfuehren
+lassen kann.
+
+Der Aufbau und das Zusammenspiel von Netzwerktreibern und Netzwerkprogrammen 
+fuer das Netzwerk-Interface wird ausfuehrlich im Projektbereich zum "KCNet" auf 
+http://susowa.homeftp.net beschrieben:
+
+Projekte -> KCNET -> Netzwerk-Software
+Projekte -> KCNET -> Netzwerk-Konfiguration
+Projekte -> KCNET -> CAOSNET.KCC und CPMNET.COM
+
+Fuer CP/M-Systeme ist natuerlich nur das Programm CPMNET.COM relevant, welches
+speziell fuer die Erstinbetriebnahme und den Test einer Netzwerkschnittstelle in
+Z80-Systemen nach Art und Weise des "KCNet" entstanden ist.
+
+Die Artikel der Webseite sollten in der genannten Reihenfolge durchgearbeitet
+werden, wobei mit CPMNET.COM das Netzwerk sowohl konfiguriert, als auch alle
+Grundfunktionen der Netzwerk-Schnittstelle ausprobiert werden koennen.
+
+Mit dem Programm lassen sich in der Betriebsart TCP- bzw. UDP-Echoserver auf der
+Transportschicht des TCP/IP-Stacks Daten im Dauertest uebertragen. PC-seitig
+kann man dafuer als Gegenstelle das Windows-Programm "AX1.EXE" von WIZnet
+einsetzen. Damit kann man sehr gut die gesamte Uebertragungskette auf 
+Fehlerfreiheit im Dauerbetrieb testen. Wenn man "AX1.EXE" nach Programmstart 
+kalibriert hat, laesst sich damit auch die maximale Uebertragungsgeschwindigkeit 
+des GNET im eigenen System feststellen, welche nahezu linear vom Takt der 
+Z80-CPU abhaengig ist. Der Hardware TCP/IP-Stack uebertraegt Daten per Ethernet
+erheblich schneller, als sie ein niedrig getaktetes CP/M-System mit Hilfe einer 
+PIO-Anbindung selbst im RAM lesen bzw. schreiben kann.
+
+
+6. Netzwerk-Software
+
+Zum Zeitpunkt Ende 2011 gibt es 8 CP/M-Anwendungen fuer das Netzwerk-Interface:
+
+CPMNETxx.COM	-	Testprogramm fuer das Interface
+NCFGxx.COM	-	automatische oder manuelle Netzwerk-Konfiguration
+PINGxx.COM	-	Programm zum "Anpingen" anderer Netzwerkteilnehmer
+TFTPxx.COM	-	Datenuebertragung in Netzwerken mit TFTP-Protokoll
+			als Client und/oder Server
+KERMIT4N.COM	-	Kermit-80 Version 4.11 als Telnet-Client oder fuer die
+			Datenuebertragung in Netzwerken mit Kermit-Protokoll als
+			Client oder Server
+WOLxx.COM	-	Wake On Lan Client zum "Aufwecken" anderer Rechner im
+			Netzwerk
+NTIMExx.COM	-	SNTP Client fuer das automatische Stellen der Systemuhr
+			per NTP-Server im LAN oder Internet
+FTPxx.COM	-	vollwertiger FTP Client fuer die CP/M-Kommandozeile, wie
+			im DOS-Fenster von Windows bzw. im Linux-Terminal
+
+Alle Programme wurden bisher ausschliesslich mit verschiedenen CP/M 2.x
+kompatiblen Systemen getestet und sollten dort problemlos funktionieren, wenn
+man die Einschraenkungen nicht standardisierter Terminal-Kodes unter CP/M
+beruecksichtigt. Eine Anpassung ist in gewissen Grenzen moeglich, wenn man die 
+notwendigen Kodes fuer sein System in der Konfigurations-Tabelle (siehe Datei
+KCNET.INC) einfach umdefinieren kann und die Software noch einmal uebersetzt. In
+allen anderen Faellen sind die Programme selbst entsprechend anzupassen. Mit der
+naechsten Version des Gesamtpaketes wird die bisherige Versionsabfrage in allen
+Programmen nach oben geoeffnet, so dass man die Software auch unter CP/M 3
+ausprobieren kann.
+
+Die Bildschirmausgaben aller CP/M-Programme setzen mindestens ein Terminal mit
+64 Spalten und 16 Zeilen voraus, eine optimale Darstellung wird mit einem 80*24
+Bildschirm erreicht. Die Programme funktionieren auch mit kleineren Terminals.
+Allerdings leidet dann die Lesbarkeit und Uebersicht, so dass man um eine
+individuelle Anpassung der Quellen kaum herumkommen wird, wenn man sinnvoll
+damit arbeiten moechte.
+
+Die KERMIT4N-Variante ist eher als Studie zu sehen, da neben den Aenderungen
+fuer den Netzwerk-Betrieb, statt ueber RS232, spezielle Anpassungen fuer das 
+KC85-Terminal vorgenommen wurden. Das kann Probleme bei Ein- und Ausgaben des
+Programmes zur Folge haben, wenn es auf anderen CP/M-Systemen verwendet wird.
+
+NTIME stellt z.Z. nur eine vorhandene Systemuhr auf KC85-Systemen automatisch
+ein, in allen anderen Systemen wird die aktuelle Zeit nur auf dem Bildschirm
+angezeigt. Dort sind Erweiterungen geplant fuer allgemeine ZSDOS/ZDDOS-Systeme
+und CP/M 3, wo man per BDOS-Funktion Zugriff auf die Systemuhr hat.
+
+Zu jedem Programm gibt es eine mehr oder weniger ausfuehrliche englische 
+Beschreibung, welche sich im Paket bei den fertig uebersetzten Programmen fuer 
+die Standardadresse des GNET befindet. Auf der Webseite werden alle Programme
+unter Software -> CP/M auch auf Deutsch in einem Artikel vorgestellt.
+
+Wenn man das GNET erfolgreich in Betrieb genommen hat, sollte man sich unbedingt
+eine BOOTFAEHIGE Netzwerk-Diskette fuer den Notfall anlegen, mit der man sein
+eigenes CP/M-System gestartet bekommt. Man kann sonst mit dem Interface nichts
+anfangen, auch wenn es am Netzwerk angeschlossen ist :-). Auf diese Diskette 
+gehoeren, neben den eigenen System- und Kopiertools, mindestens NCFGxx.COM und
+TFTPxx.COM und/oder FTPxx.COM. Man hat damit nach dem Bootvorgang direkten 
+Zugriff auf andere CP/M-Rechner mit GNET, auf alle netzwerkfaehigen PC-Systeme
+und auch auf FTP-Server im Internet. Mit dieser Konnektivitaet sollten sich 
+bequem und schnell alle softwarebedingten Probleme und Engpaesse in kuerzester
+Zeit mit minimalem Aufwand beheben lassen!
+
+================================================================================
+Alle Programme und dazugehoerige offengelegte Quelltexte duerfen unter Wahrung
+des Copyrights selbst an die eigenen Beduerfnisse angepasst und kostenfrei an
+andere Privatanwender weitergegeben werden. Eine kommerzielle Nutzung ist nicht
+gestattet und auch nicht erwuenscht.
+================================================================================
+

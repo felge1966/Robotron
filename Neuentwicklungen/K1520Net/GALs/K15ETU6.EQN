@@ -1,0 +1,39 @@
+title    K1520 Netzwerk
+pattern  GATES
+revision A
+author   Gr„mer
+date     21.04.2010
+
+chip GATES GAL22V10
+
+;pin 1    2    3         4      5    6    7    8    9    10         11      12
+     BTB  MREQ AB15      AB14   AB13 AB7  AB6  AB5  AB4  AB3        AB2     GND
+;pin 13   14   15        16     17   18   19   20   21   22         23      24
+     SL   RFSH MEMDIRDY  KCLTS  J6   J5   J4   J3   J2   CS_EEPROM  CS_ETH  VCC
+
+
+@UES U1
+
+        @define IO28      "/AB2*AB3*/AB4*AB5*/AB6*/AB7*J6*/J5"
+        @define IOC0      "/AB2*/AB3*/AB4*/AB5*AB6*AB7*J6*J5"
+        @define 8000      "/AB13*/AB14*AB15*/MREQ"
+        @define C000      "/AB13*AB14*AB15*/MREQ"
+        @define BC_JP     "J3*J4"
+        @define BIC_JP    "/J3*J4"
+        @define KC87_JP   "J3*/J4"
+
+        @define KC87_BOOT   "C000*/J2*KC87_JP*KCLTS"
+        @define KC87_NOBOOT "C000*J2*KC87_JP*BTB"
+        @define BIC_BOOT    "8000*/BTB*/J2*/SL*BIC_JP"
+        @define BIC_NOBOOT  "8000*BTB*J2*/SL*BIC_JP"
+        @define BC_BOOT     "8000*/BTB*/J2*BC_JP"
+        @define BC_NOBOOT   "8000*BTB*J2*BC_JP"
+
+equations
+
+        /CS_ETH    = IO28 + IOC0
+        /CS_EEPROM = KC87_BOOT + KC87_NOBOOT + BIC_BOOT + BIC_NOBOOT + BC_BOOT + BC_NOBOOT
+        MEMDIRDY   = BC_BOOT * RFSH + BC_NOBOOT * RFSH
+
+; end of GATES
+

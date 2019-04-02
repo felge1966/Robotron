@@ -1,0 +1,20 @@
+U1 fÅr Z80 Netzwerk
+
+CHIP U1 GAL22V10
+; E.GrÑmer 24.03.2010
+
+;pin   1    2   3   4    5      6       7      8       9   10      11        12
+       IORQ RD  A2  A3   A4     A5      A6     A7      JA2 JA3     JA4       GND
+
+;pin   13   14  15  16   17     18      19     20      21  22      23        24
+       JA7  JA6 JA5 NA15 CS_WZN SEL_ZW  CS_ETH LED_ETH RDQ ETH_PB7 ETH_BRDY  VCC
+
+
+/ETH_PB7 = ETH_BRDY
+/CS_WZN  = NA15
+SEL_ZW   =  (A5*JA5 + /A5*/JA5) * (A6*JA6 + /A6*/JA6) * (A7*JA7 + /A7*/JA7)
+/CS_ETH  =  (A2*JA2 + /A2*/JA2) * (A3*JA3 + /A3*/JA3) * (A4*JA4 + /A4*/JA4)
+          * SEL_ZW
+          
+/LED_ETH = /CS_ETH*/IORQ
+/RDQ     = /RD*LED_ETH
