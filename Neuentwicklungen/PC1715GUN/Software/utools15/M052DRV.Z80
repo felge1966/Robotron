@@ -1,0 +1,125 @@
+;---------------------------------------------------------------
+;
+;	M052-Treiber Version 1.0 (von M. Leubner)
+;
+; Aufgabe:	Modul M052 suchen und schalten,
+;		wird von USB- und Netzwerk-Software verwendet!
+;
+; V1.0 (16.10.2009)	Herausloesung aus USB-Treiber
+;
+; M052DRV.Z80 -> M052.DRV                08.10.2009 - 16.10.2009
+;---------------------------------------------------------------
+; Uebersetzung:		SLRZ80 M052DRV/M
+;		   oder ASM M052DRV=M052DRV.Z80
+;			LINK131 M052.DRV=M052DRV.REL [OP,NR]
+;			ERA M052DRV.REL
+;---------------------------------------------------------------
+;
+; Treiber-Funktionen:	ESC,o,ID,0,0	Initialisierung   (PIO's ein)
+;			ESC,o,ID,1,0	Deinitialisierung (PIO's aus)
+
+	.Z80		; CPU-Type
+
+; Makros:
+PRMSG   MACRO   MSG,N       
+	.PRINTX *MSG,N*
+	ENDM
+
+; CAOS-Systemprogramme:
+PV1	EQU	0F003H	; Sprungverteiler
+MODU	EQU	26H	; Modulsteuerung
+
+; Moduldefinitionen M052:
+
+MKENN	EQU	0FDH	; Kennung M052
+
+;***************************************
+; DRV-Header:
+
+TOP:	JR	START			; Programmverteiler
+ID:	DB	28			; ID fuer M052-Treiber
+	DB	10H			; Version 1.0
+	DB	00H or High (SIZE-1)	; Speicherbedarf
+USE:	DB	0			; USE-Counter
+	DB	0			; keine anderen Treiber erforderlich
+	DB	'M052',0		; Name des Treibers
+SLOT:	DB	0			; Steckplatz des verwendeten Moduls
+	DB	0			; urspruenglicher Schaltzustand
+ 
+; Sprungverteiler:
+
+START:	OR	A
+	JR	Z,INIT		; A=0 Initialisierung
+	DEC	A
+	JR	Z,DINIT		; A=1 Deinitialisierung
+	SCF
+	RET
+
+; Funktion A=0 Initialisierung:
+; PA:	A=0	OK
+;	A=0FEH	kein Modul gefunden
+
+INIT:	LD	A,(USE)
+	OR	A		; bereits initialisiert?
+	JR	NZ,INIT1	; ja, dann nur USE erhoehen
+
+; Modul M052 suchen:
+
+	LD	L,7		; ab Steckplatz 7
+NEXT:	LD	A,1		; nur lesen
+	CALL	PV1
+	DB	MODU		; Modultyp+Zustand "auslesen"
+	LD	A,H
+	CP	MKENN		; richtiges Modul?
+	JR	Z,FOUND
+	INC	L		; naechster Steckplatz
+	JR	NZ,NEXT
+	ld	A,0FEH		; nicht erfolgreich initialisiert
+	jr	merr		; kein Modul gefunden -> deaktivieren
+
+; Modul M052 einschalten:
+
+FOUND:	LD	H,D		; Schaltzustand und
+	LD	(SLOT),HL	; Steckplatz merken
+	SET	2,D		; PIO's einschalten
+	LD	A,2		; Modul "schalten"
+	CALL	PV1
+	DB	MODU
+
+INIT1:	LD	HL,USE
+	INC	(HL)		; eigenen USE-Counter erhoehen
+	XOR	A		; OK melden
+	ret
+
+; Funktion A=1 Deinitialisierung:
+; PA:	A=0	Treiber wurde geloescht
+;	A>0	verbleibender USE-Counter
+
+DINIT:	LD	HL,USE
+	DEC	(HL)		; USE-Counter verringern
+	LD	A,(HL)		; USE-Counter melden
+	RET	NZ		; weitere Abhaengigkeiten vorhanden
+
+; Modul in "alten" Zustand schalten:
+
+	LD	HL,(SLOT)	; L=Steckplatz
+	LD	D,H		; D=urspruenglicher Zustand
+	LD	A,2		; Modul "schalten"
+	CALL	PV1
+	DB	MODU
+	XOR	A		; geloescht melden
+merr:	LD	HL,ID
+	LD	(HL),0		; eigenen ID-Code loeschen
+	RET
+
+;***************************************
+SIZE	EQU	$-TOP	; Speicherbedarf
+;*** Codeende **************************
+
+IF2
+	.PRINTX "Treiber fuer M052"
+	.RADIX  16
+	PRMSG   <Speicherbedarf=>,%SIZE
+	.RADIX  10
+ENDIF
+	END

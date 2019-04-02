@@ -1,0 +1,717 @@
+;-----------------------------------------------------
+;
+;	UTools Version 1.5 (von M. Leubner)
+;
+; Hilfsprogramme zur Arbeit mit USB-Sticks unter CP/M
+;
+;	Verzeichnis vom USB-Stick anzeigen
+;
+; UDIR.Z80 -> UDIR.COM	18.01.2008 - 01.12.2014
+;-----------------------------------------------------
+; Uebersetzung:		SLRZ80 UDIR/R
+;			SLRNK UDIR/N,/V,/A:100,UDIR,/E
+;			ERA UDIR.REL
+;-----------------------------------------------------
+
+	.Z80
+	CSEG
+
+	JP	START		; eigentlicher Programstart
+	DB	'Z3ENV'		; ENV von Z-System
+	DB	1		; Typ-1
+ENVPTR:	DW	0		; Zeiger zu ENV-Beschreibung
+	DW	100h		; ORG-Adresse
+
+; Konfigurationsdatenbereich:
+
+	DB	'USB14   '	; Name der CFG-Datei
+VERS:	DB	15H		; Version 1.5
+OPTION:	DB	00000010b	; Optionen (Voreinstellung):
+;	Bit 0	       ^--------- Anzeige der noch vorhandenen Daten bei Start
+;	Bit 1	      ^---------- Verzeichnis sortieren?
+;	Bit 3+2	    ^^----------- 00 nachfragen
+;	Bit 3+2	    ^^----------- 01 ueberschreiben
+;	Bit 3+2	    ^^----------- 10 ignorieren
+;	Bit 3+2	    ^^----------- 11 update nach Dateidatum
+;	Bit 4	   ^------------- Textdatei?
+;	Bit 5	  ^-------------- Ausfuehrliche Verzeichnisanzeige
+;	Bit 6	 ^--------------- noch frei (evtl. Druckprotokoll?)
+;	Bit 7	^---------------- Fortschrittsanzeige (0=% 1=#)
+TAKT:	DB	FREQ		; CPU-Taktfrequenz in MHz
+
+excl:	DS	10*11,' '	; 10 auszuschliessende Dateien
+
+;-----------------------------------------------------
+
+	include	USBINC.Z80	; allgemeine Unterprogramme
+
+;-----------------------------------------------------
+
+HELP:	call	version		; Programmversion
+	call	eprint
+	db	cr,lf
+	db	' UDIR.COM listet das aktuelle Verzeichnis des USB-Stick.',cr,lf
+	db	cr,lf
+	db	' Kommandoformen:',cr,lf
+	db	'   UDIR /opt         - vollstaendiges Verzeichnis',cr,lf
+	db	'   UDIR <maske> /opt - nur Dateien anzeigen, die der Maske entsprechen',cr,lf
+	db	cr,lf
+	db	' Optionen:',cr,lf
+	db	'   / - Anzeige der Hilfeseite',cr,lf,0
+	ld	hl,option
+	bit	0,(hl)
+	jr	nz,h0
+	call	eprint
+	db	'   V - vorher anliegenden Meldungen anzeigen',cr,lf,0
+h0:
+;	db	'   B - Binaerdatei, alle Zeichen uebertragen',cr,lf
+;	db	'   T - Textdatei, Abbruch bei 1AH (^Z)',cr,lf
+;	db	'   I - vorhandene Dateien ungefragt ignorieren',cr,lf
+;	db	'   O - vorhandene Dateien ungefragt ersetzen',cr,lf
+
+	bit	1,(hl)
+	jr	nz,h1
+	call	eprint
+	db	'   S - sortiere Dateiliste',cr,lf,0
+h1:
+	bit	5,(hl)
+	jr	nz,h5
+	call	eprint
+	db	'   W - ausfuehrliche Informationen anzeigen',cr,lf,0
+h5:
+	rst	0		; Abbruch
+
+; Programmstart:
+
+START:	LD	HL,(BDOS+1)
+	LD	L,0
+	LD	SP,HL		; Stack unterhalb BDOS legen
+	dec	h
+	ld	(tpaend),hl	; Obergzenze fuer Verzeichnispuffer
+	ld	a,(FCB1+1)	; 1. Parameter testen
+	cp	'/'		; Optionen bereits hier?
+	jr	nz,par2		; nein, Dateimaske
+	ld	de,fcb2+1
+	ld	hl,fcb1+1
+	ld	b,11
+par1:	ld	a,(hl)		; Optionen von FCB1 in FCB2 verschieben
+	ld	(de),a
+	ld	a,'?'
+	ld	(hl),a		; FCB1 leeren (*.*)
+	inc	hl
+	inc	de
+	djnz	par1
+par2:	setopt			; Optionen setzen
+	call	synchr		; Synchronisation
+	jp	c,exit
+
+; Test, ob USB-Stick angeschlossen ist:
+
+	LD	A,SCS		; Short CMD-Modus
+	CALL	PUT
+	CALL	EXEC
+	jp	c,exit		; Error
+
+	LD	A,IPH		; HEX- bzw. BIN-Modus
+	CALL	PUT
+	CALL	EXEC
+	jp	c,exit		; Error
+
+	call	exec		; Flash-Disk vorhanden?
+	jp	c,exit
+
+; DIR-Kommando ausfuehren:
+
+	call	eprint
+	db	'Directory einlesen',0
+	ld	a,dir		; DIR
+	call	put
+	ld	a,cr		; ohne Parameter
+	call	put
+
+	ld	hl,$memry	; Directory hier ablegen
+	ld	(pointer),hl	; Zeiger setzen
+	ld	hl,0
+	ld	(count),hl
+read:	ld	hl,data		; Datenpuffer fuer eine Zeile
+	ld	b,size		; max. Puffergroesse
+rd1:	call	get		; Zeichen holen
+	jp	c,exit		; Fehler
+	ld	(hl),a		; ablegen
+	inc	hl
+	cp	cr
+	jr	z,rd2		; CR erkannt
+	djnz	rd1		; weiter bis Puffer voll ist
+rd2:	ld	hl,data
+	ld	a,(hl)
+	cp	'>'
+	jp	z,disp		; Prompt erkannt -> Anzeige
+	cp	cr
+	jr	z,read		; Leerzeile -> ignorieren
+
+; Eintrag in Puffer kopieren:
+
+	ld	hl,(pointer)	; Verzeichnispuffer
+	ld	de,data		; Datenpuffer
+;	ld	a,(de)
+	ld	b,12		; max. Laenge 8.3
+mov1:	ld	a,(de)
+	ld	c,a		; Zeichen merken
+	cp	cr		; fertig?
+	jr	nz,mov5
+	ld	a,b
+	cp	4		; Position von Trennzeichen?
+	ld	a,' '
+	jr	nz,mov4		; nein, Rest sind ein Leerzeichen
+	ld	a,'.'
+	jr	mov4		; Dateien ohne Typ mit Punkt ergaenzen!
+mov5:	inc	de
+	ld	a,c
+	cp	' '		; Trennzeichen Verzeichnisname/DIR ?
+	jr	z,mov2
+	cp	'.'		; Trennzeichen Dateiname/Typ?
+	jr	nz,mov4
+	ld	a,(data)
+	cp	'.'		; Unterverzeichnis?
+	jr	z,mov3
+mov2:	ld	a,b		; noch Zeichen
+	cp	5		; kleiner als 5?
+	jr	c,mov3		; ja, wir sind richtig
+	ld	a,' '
+	ld	(hl),a		; Leerzeichen einfuegen
+	inc	hl		; ansonsten ein Zeichen weiter gehen
+	dec	b		; und mitzaehlen
+	jr	mov2
+mov3:	ld	a,c
+mov4:	ld	(hl),a		; Zeichen ablegen
+	inc	hl
+	djnz	mov1		; wiederholen fuer alle 12 Zeichen
+
+; Test, ob Eintrag der Maske entspricht:
+
+	ld	hl,(pointer)
+	ld	a,(hl)
+	cp	'.'		; Unterverzeichnis?
+	jr	z,copy		; ja, nicht rausfiltern!
+	ld	de,fcb1+1
+	ld	a,(de)
+	cp	' '		; Maske angegeben?
+	jr	z,copy		; nein, alles anzeigen!
+	ld	b,8		; Dateiname pruefen
+cop1:	ld	a,(de)
+	cp	'?'		; Wildcard?
+	jr	z,cop2
+	cp	(hl)
+	jr	nz,read		; entspricht nicht der Maske!
+cop2:	inc	hl
+	inc	de
+	djnz	cop1
+	inc	hl		; Trennzeichen uebergehen
+	ld	b,3		; Dateityp pruefen
+cop3:	ld	a,(de)
+	cp	'?'		; Wildcard?
+	jr	z,cop4
+	cp	(hl)
+	jp	nz,read		; entspricht nicht der Maske!
+cop4:	inc	hl
+	inc	de
+	djnz	cop3
+
+; Eintrag uebernehmen:
+
+copy:	ld	hl,(pointer)
+	ld	bc,12
+	add	hl,bc		; Zeiger weitersetzen
+	ld	(pointer),hl	; neuer Zeiger jetzt gueltig
+	ex	de,hl
+	ld	hl,(tpaend)
+	sbc	hl,de
+	jp	c,err8		; TPA-Ueberlauf!
+	ld	hl,(count)
+	inc	hl		; Eintraege zaehlen
+	ld	(count),hl
+	jp	read		; naechsten einlesen
+
+; Anzeige sortiertes Directory:
+
+disp:	ld	hl,(pointer)
+	ld	(table),hl	; Beginn Zeigertabelle hier
+	ld	hl,(count)
+	ld	a,h
+	or	l
+	jp	z,disp3		; keine Eintraege vorhanden!
+	call	sort		; Verzeichnis sortieren
+
+	ld	a,(option)
+	bit	5,a		; ausfuehrliche Anzeige?
+	jr	z,disp0		; nein
+	call	eprint
+	db	cr,lf
+IF BS EQ 80
+	db	' --Name--.Typ  --Groesse--   ----erstellt----   ----geaendert---   --Zugriff-',0
+ELSE
+	db	' --Name--.Typ  --Groesse--   ----geaendert---',0
+ENDIF
+disp0:	ld	hl,(table)	; Zeigertabelle
+	ld	de,(count)	; Anzahl Eintraege
+	xor	a
+	ld	(page),a	; Zeilenzaehler =0
+	ld	c,1		; Spaltenzaehler
+disp1:	ld	a,d
+	or	e
+	jr	z,disp3		; alle Dateien sind angezeigt!
+	dec	c
+	jr	nz,disp6	; noch eine Spalte anzeigen
+	call	eprint
+	db	cr,lf,0		; neue Zeile
+	ld	a,(page)
+	inc	a
+	cp	20		; 20. Zeile erreicht?
+	jr	c,disp4		; nein, weiter anzeigen
+ask:	call	capin		; Eingabe abwarten
+	cp	3
+	jp	z,exit		; BRK -> Abbruch
+	cp	ESC
+	jp	z,exit		; ESC -> Abbruch
+	cp	' '
+	jr	z,disp5		; SPC -> eine weitere Zeile
+	cp	cr
+	jr	nz,ask
+	xor	a		; CR = neue Seite
+disp4:	ld	(page),a
+disp5:
+IF BS EQ 80
+	ld	c,5		; Anzahl Spalten fuer neue Zeile (80 Zeichen)
+ELSE
+	ld	c,4		; Anzahl Spalten fuer neue Zeile (64 Zeichen)
+ENDIF
+disp6:	ld	a,' '
+	call	crtx
+	push	hl
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a		; Zeiger lesen
+	ld	b,12
+disp2:	ld	a,(hl)
+	inc	hl
+	call	crtx		; Dateiname anzeigen
+	djnz	disp2
+	ld	a,(option)
+	bit	5,a
+	push	de
+	call	nz,wide		; Anzeige der zusaetzlichen Info's
+	pop	de
+	pop	hl
+	inc	hl
+	inc	hl		; naechster Zeiger
+	ld	a,' '
+	call	crtx
+	call	crtx
+	dec	de
+	jr	disp1
+
+; Zusammenfassung:
+
+disp3:	call	eprint
+	db	cr,lf,' ',0
+	ld	hl,(count)
+	call	phlfdc		; Anzahl
+	call	eprint
+	db	' Dateien/Verzeichnisse insgesamt.',cr,lf,0
+
+exit:	LD	A,ECS		; Extend. CMD-Modus
+	CALL	PUT
+	LD	A,CR
+	CALL	PUT
+	call	deinit		; Treiber deaktivieren
+	rst	0
+
+; Fehlerbehandlung:
+
+;
+err7:	call	eprint
+	db	'Unerwartete Vinculum-Antwort',cr,lf,0
+	jr	exit
+
+err8:	call	eprint
+	db	'TPA-Speicherueberlauf',cr,lf,0
+	jp	exit
+
+; eingelesenes Verzeichnis alphabetisch sortieren
+; (Verzeichnisse dabei zuerst anordnen)
+
+; 1. Zeigertabelle erzeugen:
+
+sort:	ld	hl,(table)	; Beginn der Zeigertabelle
+	ld	de,(count)
+	add	hl,de
+	add	hl,de		; + 2 Byte je Eintrag
+	ex	de,hl
+	ld	hl,(tpaend)	; TPA-Ende
+	sbc	hl,de
+	jp	c,err8		; das reicht nicht!
+
+	ld	hl,(count)	; Anzahl Elemente
+	push	hl
+	ld	de,$memry	; Tabelle der Namen
+	ld	hl,(table)	; Zeigertabelle
+	ld	bc,12		; Laenge eines Eintrages
+BLORD:	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ex	de,hl
+	add	hl,bc		; naechstes Element
+	ex	de,hl
+	ex	(sp),hl
+	dec	hl		; noch ein Element?
+	ld	a,h
+	or	l
+	ex	(sp),hl
+	jr	nz,BLORD
+	pop	hl
+
+	ld	hl,option
+	bit	1,(hl)
+	ret	z		; unsortiert anzeigen
+	call	eprint
+	db	', sortieren',0
+
+;
+; 2. Sortieren ueber Zeiger-Methode
+; (Shell-SORT von "Software Tools", Kernigan/Plaugher, (c) 1976)
+;
+	ld	hl,(count)	; Anzahl Elemente
+	ld	(GAP),hl	; GAP fuer ersten Vergleich initialisieren
+SORT0:	ld	hl,(GAP)
+	srl	h
+	rr	l		; GAP:=GAP/2
+	ld	a,l
+	or	h
+	ret	z		; fertig, wenn GAP/2=0
+	bit	0,l		; GAP ungeradzahlig?
+	jr	nz,SORT1
+	dec	hl		; GAP ungerade machen
+SORT1:	ld	(GAP),hl
+SORT2:	ld	(J),hl		; J:=GAP
+;
+; For (J=GAP+1; J<=N; J=J+1)
+;
+RIGHT:	ld	hl,(J)
+	inc	hl		; J:=J+1
+	ld	(J),hl
+	ex	de,hl		; DE=(J)
+	ld	hl,(count)
+	or	a
+	sbc	hl,de		; Anzahl-J
+	jr	c,SORT0		; neu starten, wenn I > N
+;
+; For (I=J-GAP; J>0; I=J-GAP)
+;
+LEFT:	ld	hl,(GAP)
+	ex	de,hl
+	sbc	hl,de		; I:=J-GAP
+	jr	c,RIGHT		; wenn J < 0
+	jr	z,RIGHT		; wenn J = 0
+;
+; Set JG=I+GAP
+;
+	ex	de,hl
+	add	hl,de		; JG:=I+GAP
+;
+; If (I) <= (JG) then Break else Exchange
+;
+	push	hl
+	push	de
+	call	COMPAR		; Vergleich
+	pop	de
+	pop	hl
+	jr	z,RIGHT		; Dateiname gleich (sollte nicht vorkommen!)
+	jr	nc,RIGHT	; richtig sortiert
+	push	de
+	call	SWAP		; Austausch
+	pop	de
+	jr	LEFT		; zurueck furr weitere Tests
+;
+; Zeiger zweier Elemente austauschen
+; PE:	HL,DE	Nummer der Elemente
+; VR:	AF,BC,DE,HL
+;
+SWAP:	ld	bc,(table)	; Adresstabelle
+	dec	bc
+	dec	bc
+	add	hl,hl		; *2
+	add	hl,bc		; 1. Element
+	ex	de,hl
+	add	hl,hl		; *2
+	add	hl,bc		; 2. Element
+	call	SWAP1		; erst aufrufen, dann reinlaufen
+SWAP1:	ld	c,(hl)
+	ld	a,(de)
+	ex	de,hl
+	ld	(hl),c
+	ld	(de),a
+	inc	hl
+	inc	de
+	RET
+;
+; Zwei Eintraege ueber deren Zeiger vergleichen
+; PE:	HL,DE	Nummer der Elemente
+; PA:	CY=1	(HL) > (DE)
+;	Z=1	Namen gleich, dann
+;		CY'=1	(HL) > (DE) bei Vergleich der EXT-Nummer
+; VR:	AF,BC,DE,HL
+;
+COMPAR:	ld	bc,(table)	; Adresstabelle
+	dec	bc
+	dec	bc
+	add	hl,hl		; *2
+	add	hl,bc		; 1. Element
+	ex	de,hl
+	add	hl,hl		; *2
+	add	hl,bc		; 2. Element
+	ex	de,hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)		; BC ist Adresse des ersten Elements
+	ex	de,hl
+	ld	e,c
+	ld	d,b		; DE ist Adresse des ersten Elements
+	ld	c,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,c		; HL ist Adresse des zweiten Elements
+	push	hl
+	push	de
+	ld	bc,8		; Trennzeichen nach Dateiname
+	add	hl,bc
+	ex	de,hl
+	add	hl,bc
+	ex	de,hl
+	ld	a,(de)
+	cp	(hl)		; DIR oder Datei?
+	pop	de
+	pop	hl
+	ret	nz		; unterschiedlich
+	ld	b,8		; Vergleich Dateiname
+	call	CMPLE
+	ret	nz		; unterschiedlich
+	inc	de
+	inc	hl		; Trennzeichen uebergehen
+	ld	b,3
+CMPLE:	ld	a,(de)
+	cp	(hl)		; Vergleich
+	inc	de
+	inc	hl
+	ret	nz		; Ende, sobald ungleich
+	djnz	CMPLE
+	ret
+
+; Anzeige der weiteren Informationen fuer ausfuehrliche Anzeige:
+;
+; PE:	HL	Zeiger zu Name nach Eintrag
+; PA:	C=1	neue Zeile beginnen
+
+wide:	dec	hl
+	ld	de,fcb1+11	; in FCB1
+	ld	bc,3
+	lddr			; Dateityp kopieren
+	ld	a,(hl)
+	cp	'.'		; Datei oder Verzeichnis?
+	jp	nz,widex	; bei Verzeichnis keine weitere Angabe...
+	dec	hl
+	ld	bc,8
+	lddr			; Dateiname kopieren
+
+; Dateigroesse abfragen:
+
+test0:	ld	a,dir		; DIR <dateiname>
+	call	outnam		; um Dateigroesse zu ermitteln
+	ld	a,cr
+	call	put		; Kommando ausfuehren
+
+	call	get		; 1. Zeichen abholen
+	jp	c,exit		; Break oder TimeOut
+	cp	cr
+	jp	c,err7		; nicht CR
+test1:	call	get		; naechste Zeichen (Dateiname) abholen
+	jp	c,exit		; Break oder TimeOut
+	cp	cr		; CR vor Leerzeichen?
+	jp	z,err6		; dann Datei nicht vorhanden (CF-Error)
+	cp	' '		; Trennzeichen?
+	jr	nz,test1
+	ld	hl,filesize	; Dateigroesse abholen
+	ld	b,4		; 4 Byte
+test2:	call	get
+	jp	c,exit		; Break oder TimeOut
+	ld	(hl),a
+	inc	hl
+	djnz	test2
+test3:	call	get
+	jp	c,exit
+	cp	cr		; Zeilenende erkannt?
+	jr	nz,test3
+	call	get
+	jp	c,exit
+	cp	'>'		; Prompt?
+	jp	nz,err7
+	call	get
+	jp	c,exit
+	cp	cr
+	jp	nz,err7
+
+; Dateigroesse in KByte umrechnen und anzeigen:
+
+	ld	de,(filesize+2)	; High-Teil
+	ld	hl,(filesize)	; Low-Teil
+	ld	bc,1023		; aufrunden auf volle KByte
+	add	hl,bc
+	ex	de,hl
+	ld	bc,0
+	adc	hl,bc		; 32 Bit jetzt in HLDE
+	ld	b,10
+calc1:	srl	h
+	rr	l
+	rr	d
+	rr	e
+	djnz	calc1		; /1024
+	ld	a,h
+	or	l
+	jr	z,calc2
+	call	eprint
+	db	'   > 64 MByte',0	; Datei ist 64MByte oder groesser!
+	jr	calc3
+	;
+calc2:	ex	de,hl
+	call	eprint
+	db	'  ',0
+	call	phldc		; Anzeige Dateigroesse
+	call	eprint
+	db	' KByte',0
+calc3:
+
+; Dateidatum ermitteln:
+
+	ld	a,dirt		; DIR <dateiname>
+	call	outnam		; um Dateidatum zu ermitteln
+	ld	a,cr
+	call	put		; Kommando ausfuehren
+
+	call	get		; 1. Zeichen abholen
+	jp	c,exit		; Break oder TimeOut
+	cp	cr
+	jp	nz,err7		; nicht CR
+test4:	call	get		; naechste Zeichen (Dateiname) abholen
+	jp	c,exit		; Break oder TimeOut
+	cp	cr		; CR vor Leerzeichen?
+	jp	z,err6		; dann Datei nicht vorhanden (CF-Error)
+	cp	' '		; Trennzeichen?
+	jr	nz,test4
+	ld	hl,data		; Dateidatum abholen
+	ld	b,10		; 10 Byte
+test5:	call	get
+	jp	c,exit		; Break oder TimeOut
+	ld	(hl),a
+	inc	hl
+	djnz	test5
+test6:	call	get
+	jp	c,exit
+	cp	cr		; Zeilenende erkannt?
+	jr	nz,test6
+	call	get
+	jp	c,exit
+	cp	'>'		; Prompt?
+	jp	nz,err7
+	call	get
+	jp	c,exit
+	cp	cr
+	jp	nz,err7
+
+; Dateidatum konvertieren und anzeigen:
+; im 80-Zeichen-Modus alle drei Werte
+; im 64-Zeichen-Modus nur das Aenderungsdatum
+
+IF BS EQ 80
+	ld	hl,data		; erster Wert
+	ld	de,Datum
+	call	m2utim		; Erstellt-Datum konvertieren
+	call	danz
+	call	tanz
+ENDIF
+	ld	hl,data+6	; dritter Wert
+	ld	de,Datum
+	call	m2utim		; Aenderungs-Datum konvertieren
+	call	danz
+	call	tanz
+IF BS EQ 80
+	ld	hl,data+2	; zweiter Wert (nur Datum!)
+	ld	de,Datum
+	call	m2utim		; Zugriffsdatum konvertieren
+	call	danz
+ENDIF
+widex:	ld	c,1		; naechsten Eintrag auf neue Zeile!
+	ret
+
+err6:	call	eprint
+	db	' -> Datei nicht vorhanden !?',0
+	jr	widex
+
+; Dateidatum anzeigen:
+
+danz:	call	eprint
+	db	'   ',0
+	ld	a,(Tag)
+	call	pa2hc
+	ld	a,'.'
+	call	cout
+	ld	a,(Monat)
+	call	pa2hc
+	ld	a,'.'
+	call	cout
+	ld	a,(Jahr)
+	cp	78h
+	ld	a,19h		; Jahrhundert 1978-1999
+	adc	a,0
+	daa			; oder 2000-2077
+	call	pa2hc
+	ld	a,(Jahr)
+	call	pa2hc
+	ret
+
+; Uhrzeit anzeigen:
+
+tanz:	ld	a,' '
+	call	cout
+	ld	a,(Stunde)
+	call	pa2hc
+	ld	a,':'
+	call	cout
+	ld	a,(Minute)
+	call	pa2hc
+	ret
+
+; Datenbereich:
+
+	DSEG
+size	equ	30		; Puffergroesse
+filesize:	dw	0,0	; Dateigroesse in Byte
+;kbyte:		dw	0	; Dateigroesse in KByte
+page:		db	0		; Zeilenzaehler fuer Page-Modus
+data:		ds	size,0		; Datenpuffer fuer DIR und DIRT
+
+Datum:		DS	5,0	; Datum im CP/M-Format (BCD)
+JAHR	equ	Datum
+MONAT	equ	Datum+1
+TAG	equ	Datum+2
+STUNDE	equ	Datum+3
+MINUTE	equ	Datum+4
+pointer:	dw	0		; Zeiger Verzeichnispuffer
+count:		dw	0		; Anzahl Dateien
+table:		dw	0		; Zeiger auf Beginn der Zeigertabelle (Sort)
+GAP:		dw	0		; Variable fuer SORT
+J:		dw	0		;	"	"
+
+tpaend:		dw	0	; nutzbare TPA-Endadresse
+
+	END

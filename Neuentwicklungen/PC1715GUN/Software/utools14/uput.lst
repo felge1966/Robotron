@@ -1,0 +1,1846 @@
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page   1
+UPUT    Z80
+
+    1                   ;-----------------------------------------------------
+    2                   ;
+    3                   ;	UTools Version 1.4 (von M. Leubner)
+    4                   ;
+    5                   ; Hilfsprogramme zur Arbeit mit USB-Sticks unter CP/M
+    6                   ;
+    7                   ;	Dateien auf USB-Stick schreiben
+    8                   ;
+    9                   ; UPUT.Z80 -> UPUT.COM	19.01.2008 - 03.05.2011
+   10                   ;-----------------------------------------------------
+   11                   ; Uebersetzung:		SLRZ80 UPUT/R
+   12                   ;			SLRNK UPUT/N,/V,/A:100,UPUT,/E
+   13                   ;			ERA UPUT.REL
+   14                   ;-----------------------------------------------------
+   15                   
+   16                   	.Z80
+   17                   	CSEG
+   18                   
+   19 0000' C3 0000#    	JP	START		; eigentlicher Programstart
+   20 0003' 5A 33 45 4E 	DB	'Z3ENV'		; ENV von Z-System
+   21 0008' 01          	DB	1		; Typ-1
+   22 0009' 0000        ENVPTR:	DW	0		; Zeiger zu ENV-Beschreibung
+   23 000B' 0100        	DW	100h		; ORG-Adresse
+   24                   
+   25                   ; Konfigurationsdatenbereich:
+   26                   
+   27 000D' 55 53 42 31 	DB	'USB14   '	; Name der CFG-Datei
+   28 0015' 14          VERS:	DB	14H		; Version 1.4
+   29 0016' 02          OPTION:	DB	00000010b	; Optionen:
+   30                   ;	Bit 0	       ^--------- Anzeige der noch vorhandenen Daten bei Start
+   31                   ;	Bit 1	      ^---------- Verzeichnis sortieren?
+   32                   ;	Bit 3+2	    ^^----------- 00 nachfragen
+   33                   ;	Bit 3+2	    ^^----------- 01 ueberschreiben
+   34                   ;	Bit 3+2	    ^^----------- 10 ignorieren
+   35                   ;	Bit 3+2	    ^^----------- 11 update nach Dateidatum
+   36                   ;	Bit 4	   ^------------- Textdatei?
+   37                   ;	Bit 5	  ^-------------- Ausfuehrliche Verzeichnisanzeige
+   38                   ;	Bit 6	 ^--------------- noch frei (evtl. Druckprotokoll?)
+   39                   ;	Bit 7	^---------------- Fortschrittsanzeige (0=% 1=#)
+   40 0017' ??          TAKT:	DB	FREQ		; CPU-Taktfrequenz in MHz
+   41                   
+   42 0018' 21 21 21 54 excl:	db	'!!!TIME&DAT'	; 10 auszuschliessende Dateien
+   43 0023' 3F 3F 3F 3F 	db	'????????TMP'	; temporaere Dateien
+   44 002E' 24 24 24 20 	db	'$$$     SUB'	; System-Submit
+   45 0039' 3F 3F 3F 3F 	db	'????????$?$'	; temporaere Dateien
+   46 0044' 3F 3F 3F 3F 	db	'????????BAK'	; Backup-Dateien
+   47 004F' 5B 3F 3F 3F 	db	'[??????]???'	; Dateien mit def. Sektoren
+   48 005A' 42 41 43 4B 	db	'BACKUP  LOG'	; Backup.Log nicht automatisch sichern!
+   49 0065' 20 20 20 20 	db	'           '	;
+   50 0070' 20 20 20 20 	db	'           '	;
+   51 007B' 20 20 20 20 	db	'           '	;
+   52                   
+   53                   ;-----------------------------------------------------
+   54                   
+   55                   	include	USBINC.Z80	; allgemeine Unterprogramme
+    1                  A;-----------------------------------------------------
+    2                  A;
+    3                  A;	UTools Version 1.4 (von M. Leubner)
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page   2
+USBINC  Z80
+
+    4                  A;
+    5                  A; Hilfsprogramme zur Arbeit mit USB-Sticks unter CP/M
+    6                  A;
+    7                  A;	gemeinsam genutzte Unterprogramme
+    8                  A;
+    9                  A; USBINC.Z80 (Include)	    18.01.2008 - 03.05.2011
+   10                  A;-----------------------------------------------------
+   11                  A
+   12         0000     AKC85	EQU	0	; 0 wenn PIO im CP/M direkt ansprechbar ist.
+   13                  A			; 1 wenn PIO nur ueber Treiber erreicht wird (KC)
+   14                  A
+   15         0000     AIF KC85	; KC-spezifische Einstellungen:
+   27                  AELSE 	; Einstellungen fuer nicht-KC-Systeme:
+   28                  A
+   29                  A; Portadressen definieren:
+   30         00DC     APIOA	EQU	0dch	; Daten A (Datenport, bidirektional)
+   31         00DD     APIOB	EQU	0ddh	; Daten B (Steuersignale, Bitbetrieb)
+   32         00DE     APIOAS	EQU	0deh	; Steuer A
+   33         00DF     APIOBS	EQU	0dfh	; Steuer B
+   34         0040     ABS	EQU	64	; Bildschirmbreite in Zeichen (64 oder 80 moeglich!)
+   35         0004     AFREQ	EQU	4	; CPU-Taktfrequenz in MHz
+   36                  A
+   37                  AENDIF ;KC85
+   38                  A
+   39                  A; CP/M-Vereinbarungen:
+   40                  A
+   41         000A     ALF	EQU	0AH
+   42         000D     ACR	EQU	0DH
+   43         001A     AEOF	EQU	1AH
+   44         001B     AESC	EQU	1BH
+   45         0005     ABDOS	EQU	5
+   46         000C     A_GETVER	EQU	12	; CP/M-Version testen
+   47         000E     A_SELDSK	EQU	14	; Laufwerk waehlen
+   48         0011     A_FIRST	EQU	17	; ersten Verzeichniseintrag suchen
+   49         0012     A_NEXT	EQU	18	; naechsten Verzeichniseintrag suchen
+   50         0020     A_SETUSR	EQU	32	; USER waehlen
+   51         0023     A_CALC	EQU	35	; Dateigroesse berechnen
+   52         0030     A_DOSVER	EQU	48	; erweiterte DOS-Version holen
+   53         0062     A_GETCLK	EQU	98	; Uhrzeit holen
+   54         0066     A_GETDAT	EQU	102	; Datumstempel lesen
+   55         0067     A_SETDAT	EQU	103	; Datumstempel schreiben
+   56         005C     AFCB1	EQU	5CH	; erster FCB
+   57         006C     AFCB2	EQU	6CH	; zweiter FCB
+   58         0080     ADEFDMA	EQU	80H	; Standard-DMA-Puffer
+   59                  A
+   60                  A; Vinculum-Kommandos:
+   61                  A
+   62         0001     ADIR	EQU	01H	; List file(s)
+   63         0007     ADLF	EQU	07H	; Delete File
+   64         0008     AWRF	EQU	08H	; Write to File
+   65         0009     AOPW	EQU	09H	; Open/write
+   66         000A     ACLF	EQU	0AH	; Close
+   67         000B     ARDF	EQU	0BH	; Read from File
+   68         000E     AOPR	EQU	0EH	; Open/read
+   69         0010     ASCS	EQU	10H	; Short CMD
+   70         0011     AECS	EQU	11H	; Extend. CMD
+   71         002F     ADIRT	EQU	2FH	; List File Date&Time
+   72         0091     AIPH	EQU	91H	; Binaer-Modus einstellen
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page   3
+USBINC  Z80
+
+   73                  A
+   74                  A; Verwendung fertiger Routinen:
+   75                  A
+   76                  AEXT	$MEMRY		; Endadresse von Linker
+   77                  A
+   78                  A	.request	DSLIBS
+   79                  AEXT	M2UTIM		; DOS-Datum zu ZSDOS konvertieren
+   80                  AEXT	U2MTIM		; ZSDOS-Datum zu DOS konvertieren
+   81                  A
+   82                  A	.request	SYSLIBS
+   83                  AEXT	INITFCB		; FCB initialisieren
+   84                  AEXT	SETDMA		; DMA-Adresse einstellen
+   85                  AEXT	F$OPEN		; Datei oeffnen
+   86                  AEXT	F$DELETE	; Datei loeschen
+   87                  AEXT	F$MAKE		; Datei erzeugen
+   88                  AEXT	F$WRITE		; Sektor in Datei schreiben
+   89                  AEXT	F$READ		; Sektor aus Datei lesen
+   90                  AEXT	F$CLOSE		; Datei schliessen
+   91                  AEXT	PFN2		; Dateiname anzeigen
+   92                  AEXT	COUT		; Zeichenausgabe zu CON:
+   93                  AEXT	POUT		; Zeichenausgabe zu PUN:
+   94                  AEXT	RIN		; Zeicheneingabe von RDR:
+   95                  AEXT	EPRINT		; Zeichenkette anzeigen
+   96                  AEXT	CAPIN		; Tastaturabfrage mit UPCASE
+   97                  AEXT	CONDIN		; Tastaturabfrage
+   98                  AEXT	PUTUD		; aktuelles DU: sichern
+   99                  AEXT	GETUD		; gemerktes DU: regenerieren
+  100                  AEXT	PA2HC		; A als 2stellige HEX/BCD-Zahl anzeigen
+  101                  AEXT	PHLFDC		; HL als 1-5stellige Dezimalzahl anzeigen
+  102                  AEXT	PHLDC		; HL als Dezimalzahl mit Leerzeichen anzeigen
+  103                  A
+  104                  A; ---------------------------------------------------------
+  105                  A
+  106                  A; Optionen aus 2. Parameter ermitteln und abspeichern:
+  107                  A
+  108                  Asetopt	macro
+  109                  A; Verwendung der Optionsbits in allen Programmen gleich, aber nicht alle genutzt:
+  110                  A;
+  111                  A;	DB	00000010b	; Optionen (Voreinstellung):
+  112                  A; V	Bit 0	       ^--------- Anzeige der noch vorhandenen Daten bei Start
+  113                  A; S	Bit 1	      ^---------- Verzeichnis sortieren?
+  114                  A; O	Bit 2	     ^----------- vorhandene Datei ueberschreiben?
+  115                  A; I	Bit 3	    ^------------ vorhandene Datei ignorieren?
+  116                  A; U	Bit 3+2     ^^----------- vorhandene Datei aktualisieren?
+  117                  A; T/B	Bit 4	   ^------------- Textdatei?
+  118                  A; W	Bit 5	  ^-------------- Ausfuehrliche Verzeichnisanzeige
+  119                  A; P	Bit 6	 ^--------------- noch frei (evtl. Druckprotokoll?)
+  120                  A; M	Bit 7	^---------------- Fortschrittsanzeige (0=% 1=#)
+  121                  A
+  122                  A	ld	hl,option	; Options-Flags
+  123                  A	ld	de,fcb2+1	; Optionen in FCB2 testen
+  124                  A	ld	b,11
+  125                  A	ld	a,(de)
+  126                  A	cp	'/'		; Einleitung fuer Optionen?
+  127                  A	jr	z,opt7
+  128                  Agetopt:	ld	a,(de)		; Optionen testen
+  129                  A	cp	'/'
+  130                  A	jp	z,help		; // ist Hilfe
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page   4
+USBINC  Z80
+
+  131                  A	cp	'O'		; ungefragt ueberschreiben?
+  132                  A	jr	nz,opt1
+  133                  A	set	2,(hl)
+  134                  A	res	3,(hl)
+  135                  Aopt1:	cp	'T'		; Textdatei?
+  136                  A	jr	nz,opt2
+  137                  A	set	4,(hl)
+  138                  Aopt2:	cp	'B'		; Binaerdatei?
+  139                  A	jr	nz,opt3
+  140                  A	res	4,(hl)
+  141                  Aopt3:	cp	'V'		; alte Daten anzeigen?
+  142                  A	jr	nz,opt4
+  143                  A	set	0,(hl)
+  144                  Aopt4:	cp	'S'		; Liste sortieren?
+  145                  A	jr	nz,opt5
+  146                  A	set	1,(hl)
+  147                  Aopt5:	cp	'I'		; vorhandene Datei ignorieren?
+  148                  A	jr	nz,opt6
+  149                  A	res	2,(hl)
+  150                  A	set	3,(hl)
+  151                  Aopt6:	cp	'W'		; ausfuehrliche Anzeige?
+  152                  A	jr	nz,opt7
+  153                  A	set	5,(hl)
+  154                  Aopt7:	cp	'M'		; Fortschrittsanzeige wie MTOOLs?
+  155                  A	jr	nz,opt8
+  156                  A	set	7,(hl)
+  157                  Aopt8:	cp	'U'		; vorhandene Dateien aktualisieren?
+  158                  A	jr	nz,opt9
+  159                  A	set	2,(hl)
+  160                  A	set	3,(hl)
+  161                  Aopt9:	inc	de
+  162                  A	djnz	getopt
+  163                  A	endm
+  164                  A
+  165                  A; Synchronisieren mit Vinculum:
+  166                  A;
+  167                  A; PA:	CY=1	Break, TimeOut oder Error
+  168                  A; VR:	AF,HL,BC
+  169                  A
+  170 0086'            Asynchr:
+  171         0000     AIF KC85				; CPU-Taktfrequenz von D008 ermitteln!
+  206                  AELSE ;KC85
+  207                  A
+  208                  A; PIO Port B initialisieren:
+  209 0086' 3E CF      A	ld	a,0CFH		; Bitbetrieb
+  210 0088' D3 DF      A	out	(piobs),a
+  211 008A' 3E 33      A	ld	a,00110011b	; I/O festlegen
+  212 008C' D3 DF      A	out	(piobs),a
+  213 008E' 3E 07      A	ld	a,07H		; DI, Maske folgt nicht
+  214 0090' D3 DF      A	out	(piobs),a
+  215                  A;	ld	a,0FFH		; kein Bit aktiv
+  216                  A;	out	(piobs),a
+  217 0092' 3E C4      A	ld	a,0C4H		; #PROG=1, #RESET=1, RD&WR inaktiv
+  218 0094' D3 DD      A	out	(piob),a
+  219                  A
+  220                  A; PIO Port A initialisieren:
+  221 0096' 3E 8F      A	ld	a,8FH		; bidirektional
+  222 0098' D3 DE      A	out	(pioas),a
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page   5
+USBINC  Z80
+
+  223 009A' 3E 07      A	ld	a,07H		; kein INT
+  224 009C' D3 DE      A	out	(pioas),a
+  225 009E' DB DC      A	in	a,(pioa)	; Dummy-Eingabe
+  226                  A
+  227                  AENDIF ;KC85
+  228                  A
+  229                  A; dreistufiges Synchronisieren:
+  230                  A
+  231 00A0' 3A 0017'   Async:	LD	A,(TAKT)	; CPU-Taktfrequenz in MHz
+  232 00A3' 47         A	LD	B,A
+  233 00A4' 21 0000    A	LD	hl,0		; Startwert fuer Multiplikation
+  234         0000     AIF KC85
+  236                  AELSE
+  237                  A	;;ld	de,600		; Faktor fuer Zeitschleife bei CP/M-Version
+  238 00A7' 11 01F4    A	ld	de,500	; RHdnsel
+  239                  AENDIF
+  240 00AA' 19         AT3:	add	hl,de		; aufsummieren
+  241 00AB' 10 FD      A	djnz	T3
+  242 00AD' 54         A	ld	d,h
+  243 00AE' 5D         A	ld	e,l		; DE = Zaehlerwert fuer Zeitschleife
+  244 00AF' CD 0000#   Asyn0:	call	condin		; Tastatureingabe vorhanden?
+  245 00B2' 28 ??      A	jr	z,syn1		; nein
+  246 00B4' FE 03      A	cp	3		; Break?
+  247 00B6' CA 0000    A	jp	z,0
+  248 00B9' FE 1B      A	cp	esc		; ESC?
+  249 00BB' CA 0000    A	jp	z,0
+  250 00BE' 0E 01      Asyn1:	ld	c,1		; Staus aus Koppel-RAM lesen
+  251 00C0' CD 0000#   A	call	status		; Vinculum Status abfragen
+  252 00C3' 0F         A	rrca
+  253 00C4' 38 ??      A	jr	c,syn2		; keine Daten vorhanden
+  254 00C6' CD 0000#   A	call	get		; vorhandene Daten abholen
+  255 00C9' 21 0016'   A	ld	hl,option
+  256 00CC' CB 46      A	bit	0,(hl)
+  257 00CE' C4 0000#   A	call	nz,crtx		; und anzeigen, wenn konfiguriert
+  258 00D1' 18 CD      A	jr	sync
+  259 00D3' 0F         Asyn2:	rrca	
+  260 00D4' 38 CA      A	jr	c,sync		; noch nicht bereit, Daten zu schreiben
+  261 00D6' 10 FE      A	djnz	$		; kurze Zeit warten
+  262 00D8' 1B         A	dec	de
+  263 00D9' 7A         A	ld	a,d		; Zaehler abwarten
+  264 00DA' B3         A	or	e
+  265 00DB' 20 D2      A	jr	nz,syn0		; nochmals nachschauen...
+  266 00DD' 01 0000    A	ld	bc,0
+  267 00E0' CD 0000#   A	call	status		; Kontrolle mit ESC,ID durchfuehren
+  268 00E3' E6 03      A	and	3		; nur Bit 0 und 1 auswerten
+  269 00E5' FE 01      A	cp	1		; alle Daten abgeholt und bereit zum schreiben?
+  270 00E7' 20 B7      A	jr	nz,sync		; nein !
+  271                  A
+  272 00E9' 3E 0D      A	ld	a,cr
+  273 00EB' CD 0000#   A	call	put		; <cr> muss irgendwie <cr> zurueckgeben
+  274 00EE' CD 0000#   Asyn3:	call	get
+  275 00F1' D8         A	ret	c		; BRK oder TimeOut
+  276 00F2' FE 0D      A	cp	cr
+  277 00F4' 20 F8      A	jr	nz,syn3
+  278                  A
+  279 00F6' 3E 45      A	ld	a,'E'		; E <cr> muss E <cr> zurueckgeben
+  280 00F8' CD 0000#   A	call	put
+  281 00FB' 3E 0D      A	ld	a,cr
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page   6
+USBINC  Z80
+
+  282 00FD' CD 0000#   A	call	put
+  283 0100' CD 0000#   Asyn4:	call	get		; Daten holen
+  284 0103' D8         A	ret	c		; BRK oder TimeOut
+  285 0104' FE 45      A	cp	'E'
+  286 0106' 20 F8      A	jr	nz,syn4
+  287 0108' CD 0000#   A	call	get
+  288 010B' D8         A	ret	c		; BRK oder TimeOut
+  289 010C' FE 0D      A	cp	cr
+  290 010E' 20 F0      A	jr	nz,syn4
+  291                  A
+  292 0110' 3E 65      A	ld	a,'e'		; e <cr> muss e <cr> zurueckgeben
+  293 0112' CD 0000#   A	call	put
+  294 0115' 3E 0D      A	ld	a,cr
+  295 0117' CD 0000#   A	call	put
+  296 011A' CD 0000#   Asyn5:	call	get		; Daten abholen
+  297 011D' D8         A	ret	c		; BRK oder TimeOut
+  298 011E' FE 65      A	cp	'e'
+  299 0120' 20 F8      A	jr	nz,syn5
+  300 0122' CD 0000#   A	call	get
+  301 0125' D8         A	ret	c		; BRK oder TimeOut
+  302 0126' FE 0D      A	cp	cr
+  303 0128' 20 F0      A	jr	nz,syn5
+  304 012A' C9         A	ret
+  305                  A
+  306         0000     AIF KC85
+  362                  AELSE ;KC85
+  363                  A; Vinculum Status abfragen:
+  364                  A;
+  365                  A; PA:	A	Statusbyte von VDIP1
+  366                  A;		Bit 0 = 1 wenn Eingabedaten vorhanden
+  367                  A;		Bit 1 = 1 bereit fuer Datenausgabe
+  368                  A
+  369 012B' DB DD      Astatus:	in	a,(PIOB)	; Status abfragen
+  370 012D' C9         A	ret
+  371                  A
+  372                  A; Eingabe von VDIP1 abholen (mit Break und TimeOut):
+  373                  A; PA:	A	Datenbyte
+  374                  A;	CY=1	TimeOut oder Break
+  375                  A; VR:	AF
+  376                  A
+  377 012E' C5         AGET:	push	bc
+  378 012F' 01 0001    A	ld	bc,1		; Zeitkonstante
+  379 0132' CD 0000#   Aget4:	call	condin		; Tastatureingabe vorhanden?
+  380 0135' 28 ??      A	jr	z,get1		; nein
+  381 0137' FE 03      A	cp	3		; Break?
+  382 0139' 28 ??      A	jr	z,get5
+  383 013B' FE 1B      A	cp	esc		; ESC?
+  384 013D' 28 ??      A	jr	z,get5
+  385 013F' DB DD      Aget1:	in	a,(PIOB)	; Status abfragen
+  386 0141' 0F         A	rrca			; Daten vorhanden?
+  387 0142' 30 ??      A	jr	nc,get3		; ja,abholen
+  388 0144' 03         A	inc	bc
+  389 0145' 78         A	ld	a,b
+  390 0146' B1         A	or	c		; TimeOut?
+  391 0147' 20 E9      A	jr	nz,get4
+  392 0149' CD 0000#   Aget2:	call	eprint
+  393 014C' 54 69 6D 65A	db	'TimeOut Error',0
+  394 015A' 18 ??      A	jr	get6
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page   7
+USBINC  Z80
+
+  395 015C' CD 0000#   Aget5:	call	eprint
+  396 015F' 42 72 65 61A	db	'Break',0
+  397 0165' C1         Aget6:	pop	bc
+  398 0166' 37         A	scf			; Fehler
+  399 0167' C9         A	ret
+  400 0168' 3E C0      Aget3:	LD	A,0C0H		; RD# aktiv
+  401 016A' D3 DD      A	OUT	(PIOB),A
+  402 016C' DB DC      A	IN	A,(PIOA)	; Daten holen
+  403 016E' 4F         A	LD	C,A
+  404 016F' 3E C4      A	LD	A,0C4H		; RD# inaktiv
+  405 0171' D3 DD      A	OUT	(PIOB),A
+  406 0173' 79         A	LD	A,C
+  407 0174' C1         A	pop	bc
+  408 0175' B7         A	or	a		; CY=0 (OK)
+  409 0176' C9         A	ret
+  410                  A
+  411                  A; Ausgabe zu VDIP1 senden:
+  412                  A; PE:	A	Datenbyte
+  413                  A; VR:	-
+  414                  A
+  415 0177' D3 DC      APUT:	OUT	(PIOA),A	; Daten
+  416 0179' F5         A	push	af
+  417 017A' DB DD      Aput1:	IN	A,(PIOB)	; Status abfragen
+  418 017C' 0F         A	RRCA
+  419 017D' 0F         A	RRCA
+  420 017E' 38 FA      A	JR	C,put1		; nicht bereit, warten!
+  421 0180' 3E CC      A	LD	A,0CCH
+  422 0182' D3 DD      A	OUT	(PIOB),A	; WR aktiv
+  423 0184' 3E C4      A	LD	A,0C4H
+  424 0186' D3 DD      A	OUT	(PIOB),A	; WR inaktiv
+  425 0188' F1         A	pop	af
+  426 0189' C9         A	RET
+  427                  AENDIF ;KC85
+  428                  A
+  429                  A; Kommando, gefolgt von Dateiname (fcb1) ausloesen:
+  430                  A;
+  431                  A; PE:	A	Kommando
+  432                  A; PA:	CY=1	Fehler
+  433                  A
+  434 018A' CD 0177'   AOUTNAM:	CALL	PUT		; Kommando
+  435 018D' 3E 20      A	LD	A,' '
+  436 018F' CD 0177'   A	CALL	PUT
+  437 0192' 21 005D    A	LD	HL,fcb1+1	; Dateiname
+  438 0195' 06 0B      A	LD	B,11		; Laenge 8+3
+  439 0197' 7E         AOPEN:	LD	A,(HL)
+  440 0198' E5         A	push	hl
+  441 0199' E6 7F      A	and	7fh		; Bit 7 ruecksetzen
+  442 019B' 21 0000#   A	ld	hl,errchr
+  443 019E' 0E 05      A	ld	c,5		; 5 verbotene Zeichen testen
+  444 01A0' BE         Aop1:	cp	(hl)
+  445 01A1' 20 ??      A	jr	nz,op2
+  446 01A3' 3E 5F      A	ld	a,'_'		; -> konvertieren
+  447 01A5' 23         Aop2:	inc	hl
+  448 01A6' 0D         A	dec	c
+  449 01A7' 20 F7      A	jr	nz,op1
+  450 01A9' E1         A	pop	hl
+  451 01AA' 23         A	INC	HL
+  452 01AB' FE 21      A	CP	21H		; Leerzeichen oder Steuerzeichen?
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page   8
+USBINC  Z80
+
+  453 01AD' D4 0177'   A	CALL	nc,PUT		; Dateiname
+  454 01B0' 78         A	ld	a,b
+  455 01B1' FE 04      A	cp	4
+  456 01B3' 3E 2E      A	ld	a,'.'		; Trennzeichen vor Dateityp
+  457 01B5' CC 0177'   A	call	z,PUT
+  458 01B8' 10 DD      A	DJNZ	OPEN
+  459 01BA' C9         A	ret
+  460                  A	;
+  461 01BB' 5C 2F 22 7CAERRCHR:	DB	'\/"|+'		; Zeichen die unter DOS verboten sind
+  462                  A
+  463                  A; Vinculum-Kommando ausfuehren:
+  464                  A;
+  465                  A;PA:	CY=1	Fehler (VDIP1-Fehler oder BRK oder TimeOut)
+  466                  A;VR:	AF
+  467                  A
+  468 01C0' 3E 0D      AEXEC:	LD	A,CR	; Kommandoabschluss
+  469 01C2' CD 0177'   A	CALL	PUT
+  470 01C5' CD 012E'   Aex1:	CALL	GET	; Ergebnis holen
+  471 01C8' D8         A	RET	C	; BRK oder TimeOut!
+  472 01C9' FE 3E      A	CP	'>'
+  473 01CB' 20 ??      A	JR	NZ,ERR
+  474 01CD' CD 012E'   A	CALL	GET
+  475 01D0' D8         A	RET	C
+  476 01D1' FE 0D      A	CP	CR	; OK, fertig?
+  477 01D3' C8         A	RET	Z
+  478 01D4' CD 0000#   AERR:	CALL	CRTX	; Errorcode anzeigen
+  479 01D7' CD 012E'   A	CALL	GET
+  480 01DA' 38 ??      A	JR	C,EX3
+  481 01DC' FE 0D      A	CP	CR	; Ende?
+  482 01DE' 20 F4      A	JR	NZ,ERR
+  483 01E0' CD 0000#   Aex3:	CALL	eprint
+  484 01E3' 2D 45 72 72A	db	'-Error',0
+  485 01EA' 37         A	SCF		; Fehler!
+  486 01EB' C9         A	RET
+  487                  A
+  488                  A; spezielle CRT-Routine:
+  489                  A;
+  490                  A; PE:	A	Zeichencode
+  491                  A; VR:	-
+  492                  A
+  493 01EC' F5         ACRTX:	push	af
+  494 01ED' E6 7F      A	and	7fh		; Bit 7 abschneiden
+  495 01EF' FE 20      A	cp	20h
+  496 01F1' 30 ??      A	jr	nc,crt1		; darstellbares Zeichen!
+  497 01F3' FE 0D      A	cp	cr
+  498 01F5' 20 ??      A	jr	nz,crt2		; nur CR zulaessig
+  499 01F7' CD 0000#   A	call	cout
+  500 01FA' 3E 0A      A	ld	a,lf		; mit LF ergaenzen
+  501 01FC' CD 0000#   Acrt1:	call	cout
+  502 01FF' F1         Acrt2:	pop	af
+  503 0200' C9         A	ret
+  504                  A
+  505                  A; Anzeige UTools-Programmversion:
+  506                  A
+  507 0201'            Aversion:
+  508 0201' CD 0000#   A	call	eprint
+  509 0204' 20 55 54 6FA	db	' UTools v',0
+  510 020E' 3A 0015'   A	ld	a,(vers)	; Versionsnummer BCD
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page   9
+USBINC  Z80
+
+  511 0211' CD 0000#   A	call	verbcd
+  512 0214' CD 0000#   A	call	eprint
+  513         0000     AIF KC85
+  515                  AELSE ;KC85
+  516 0217' 20 43 50 2FA	DB	' CP/M '
+  517                  AENDIF ;KC85
+  518 021D' 20 20 28 63A	db	'  (c) 2008-2011, M. Leubner',cr,lf,0
+  519 023B' C9         A	ret
+  520                  A;
+  521                  A; Versionsnummer x.y anzeigen
+  522                  A; PE:	A	BCD-Wert
+  523                  A; VR:	-
+  524                  A;
+  525 023C' F5         AVERBCD:	push	af
+  526 023D' 1F         A	rra
+  527 023E' 1F         A	rra
+  528 023F' 1F         A	rra
+  529 0240' 1F         A	rra
+  530 0241' CD 0000#   A	call	ahex0		; hoeherwertigen Teil
+  531 0244' 3E 2E      A	ld	a,'.'		; Trennzeichen
+  532 0246' CD 0000#   A	call	cout
+  533 0249' F1         A	pop	af		; niederwertigen Teil
+  534 024A' F5         AAHEX0:	PUSH	AF
+  535 024B' E6 0F      A	AND	0FH
+  536 024D' C6 90      A	ADD	A,90H
+  537 024F' 27         A	DAA
+  538 0250' CE 40      A	ADC	A,40H
+  539 0252' 27         A	DAA
+  540 0253' CD 0000#   A	CALL	cout
+  541 0256' F1         A	POP	AF
+  542 0257' C9         A	RET
+  543                  A
+  544                  A;
+  545                  A; Treiberumleitung deaktivieren (vor EXIT):
+  546                  A; V1.4: vorher noch alle anliegenden Daten abholen
+  547                  A;
+  548 0258'            Adeinit:
+  549         0000     Aif KC85
+  583                  Aendif ;KC85
+  584 0258' C9         A	ret
+  585                  A
+  586                  APROZENT	macro
+  587                  A; Fortschrittsanzeige in Prozent der Dateigroesse berechnen und anzeigen
+  588                  A;
+  589                  A; PE:	(filesize0)	Gesamtgroesse
+  590                  A;	(filesize)	Laufvariable (Rueckwartszaehler)
+  591                  A;
+  592                  A; VR:	alle
+  593                  A
+  594                  APROZ:	ld	a,(option)	; Fortschritt wie anzeigen?
+  595                  A	rlca
+  596                  A	jr	nc,PROZ0	; Fortschrittsanzeige in Prozent
+  597                  A	ld	a,'#'
+  598                  A	jp	cout		; Zeichen anzeigen fuer einen Datenblock
+  599                  A	;
+  600                  APROZ0:	LD	IX,FILESIZE0	; Gesamtdateigroesse
+  601                  A	ld	de,(filesize)
+  602                  A	ld	bc,(filesize+2)	; BCDE = restliche Anzahl
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  10
+USBINC  Z80
+
+  603                  A	ld	a,(ix)
+  604                  A	sub	e
+  605                  A	ld	e,a
+  606                  A	ld	a,(ix+1)
+  607                  A	sbc	a,d
+  608                  A	ld	d,a
+  609                  A	ld	a,(ix+2)
+  610                  A	sbc	a,c
+  611                  A	ld	c,a
+  612                  A	ld	a,(ix+3)
+  613                  A	sbc	a,b
+  614                  A	ld	b,a		; BCDE = abgearbeitete Groesse
+  615                  A	ld	a,cr
+  616                  A	call	cout		; Cursor an Zeilenanfang setzen
+  617                  A	LD	A,(IX)
+  618                  A	OR	(IX+1)
+  619                  A	OR	(IX+2)
+  620                  A	OR	(IX+3)
+  621                  A	JR	Z,PROZ1		; Dateigroesse = 0 -> 100,0%
+  622                  A	xor	a
+  623                  A	ex	af,af'		; fuehrende Nullen ausblenden
+  624                  A	call	ZIFFER		; Hunderter anzeigen
+  625                  A	call	mul10		; BCDE * 10
+  626                  A	call	ZIFFER		; Zehner anzeigen
+  627                  A	call	mul10		; BCDE * 100
+  628                  A	ld	a,'0'
+  629                  A	ex	af,af'
+  630                  A	call	ZIFFER		; Einer anzeigen
+  631                  A	ld	a,','
+  632                  A	call	cout		; Trennzeichen
+  633                  A	call	mul10		; BCDE * 1000
+  634                  A	call	ZIFFER		; Zehntel anzeigen
+  635                  A	ld	a,'%'
+  636                  A	jp	cout
+  637                  APROZ1:	call	eprint
+  638                  A	db	'100,0%',0
+  639                  A	ret
+  640                  A
+  641                  A; 32-Bit-Zahl in BCDE mit 10 multiplizieren
+  642                  A;
+  643                  A; PE:	BCDE	32-Bit-Zahl
+  644                  A; PA:	BCDE	Ergebnis
+  645                  A;
+  646                  Amul10:	SLA	E
+  647                  A	RL	D
+  648                  A	RL	C
+  649                  A	RL	B	; *2
+  650                  A	push	bc
+  651                  A	push	de
+  652                  A	SLA	E
+  653                  A	RL	D
+  654                  A	RL	C
+  655                  A	RL	B	; *4
+  656                  A	SLA	E
+  657                  A	RL	D
+  658                  A	RL	C
+  659                  A	RL	B	; *8
+  660                  A	POP	HL
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  11
+USBINC  Z80
+
+  661                  A	ADD	HL,DE
+  662                  A	EX	DE,HL
+  663                  A	POP	HL
+  664                  A	ADC	HL,BC
+  665                  A	LD	B,H
+  666                  A	LD	C,L	; BCDE*10 (8+2)
+  667                  A	ret
+  668                  A
+  669                  A; Verhaeltnis zweier 32-Bit-Zahlen BCD berechnen und anzeigen
+  670                  A; (eine Stelle fuer Prozentanzeige)
+  671                  A;
+  672                  A; PE:	BCDE	32-Bit-Ziffer
+  673                  A;	IX	Wertigkeit (Gesamtdateigroesse)
+  674                  A;	A'	'0' wenn Ausgabe laeuft
+  675                  A; PA:	BCDE	Rest, der bei der Teilung uebrig bleibt
+  676                  A
+  677                  AZIFFER:	LD	L,99H		; Zaehler
+  678                  AZIFF1:	LD	A,L
+  679                  A	ADD	A,1		; HL = HL+1 (BCD)
+  680                  A	DAA
+  681                  A	LD	L,A
+  682                  A
+  683                  A	LD	A,E
+  684                  A	SUB	(IX)		; E = niederwertigstes Byte
+  685                  A	LD	E,A
+  686                  A	LD	A,D
+  687                  A	SBC	A,(IX+1)	; D = mittleres Byte
+  688                  A	LD	D,A
+  689                  A	LD	A,C
+  690                  A	SBC	A,(IX+2)	; C = hoeherwertiges Byte
+  691                  A	LD	C,A
+  692                  A	LD	A,B
+  693                  A	SBC	A,(IX+3)	; B = hoechstwertiges Byte
+  694                  A	LD	B,A
+  695                  A	JR	NC,ZIFF1	; nochmal enthalten
+  696                  A
+  697                  A	LD	A,E
+  698                  A	ADD	A,(IX)		; letzten Teil wieder addieren
+  699                  A	LD	E,A
+  700                  A	LD	A,D
+  701                  A	ADC	A,(IX+1)
+  702                  A	LD	D,A
+  703                  A	LD	A,C
+  704                  A	ADC	A,(IX+2)
+  705                  A	LD	C,A
+  706                  A	LD	A,B
+  707                  A	ADC	A,(IX+3)
+  708                  A	LD	B,A
+  709                  A
+  710                  A	LD	A,L
+  711                  A	AND	0FH		; Zahler = null?
+  712                  A	JR	NZ,ZIFF2	; nein, sofort anzeigen
+  713                  A	EX	AF,AF'
+  714                  A	PUSH	AF
+  715                  A	EX	AF,AF'
+  716                  A	POP	AF
+  717                  A	OR	A		; laeuft Ausgabe schon?
+  718                  A	RET	Z		; nein, keine fuehrende Nullen!
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  12
+USBINC  Z80
+
+  719                  AZIFF2:	EX	AF,AF'
+  720                  A	LD	A,'0'		; Ausgabe laeuft
+  721                  A	EX	AF,AF'
+  722                  A	OR	'0'		; Ziffer
+  723                  A	JP	COUT		; anzeigen
+  724                  A	endm
+  725                  A
+  726                  A;	end of include
+   56                   
+   57                   ;-----------------------------------------------------
+   58                   
+   59 0259' CD 0201'    HELP:	call	version		; Programmversion
+   60 025C' CD 0000#    	call	eprint
+   61 025F' 0D 0A       	db	cr,lf
+   62 0261' 20 55 50 55 	db	' UPUT.COM schreibt Dateien auf den USB-Stick.',cr,lf
+   63 0290' 0D 0A       	db	cr,lf
+   64 0292' 20 4B 6F 6D 	db	' Kommandoformen:',cr,lf
+   65 02A4' 20 20 20 55 	db	'   UPUT <name> /opt     - Datei aus aktuellem Verzeichnis',cr,lf
+   66 02DF' 20 20 20 55 	db	'   UPUT <dir:name> /opt - Datei aus angegebenen Verzeichnis',cr,lf
+   67 031C' 0D 0A       	db	cr,lf
+   68 031E' 20 4F 70 74 	db	' Optionen:',cr,lf
+   69 032A' 20 20 20 2F 	db	'   / - Anzeige der Hilfeseite',cr,lf,0
+   70 034A' 21 0016'    	ld	hl,option
+   71 034D' CB 46       	bit	0,(hl)
+   72 034F' 20 ??       	jr	nz,h0
+   73 0351' CD 0000#    	call	eprint
+   74 0354' 20 20 20 56 	db	'   V - vorher anliegenden Meldungen anzeigen',cr,lf,0
+   75 0383'             h0:
+   76 0383' CB 66       	bit	4,(hl)
+   77 0385' 20 ??       	jr	nz,h41
+   78 0387' CD 0000#    	call	eprint
+   79 038A' 20 20 20 54 	db	'   T - Textdatei, Abbruch bei EOF (1Ah=^Z)',cr,lf,0
+   80 03B7' 18 ??       	jr	h42
+   81 03B9' CD 0000#    h41:	call	eprint
+   82 03BC' 20 20 20 42 	db	'   B - Binaerdatei, alle Zeichen uebertragen',cr,lf,0
+   83 03EB'             h42:
+   84 03EB' 7E          	ld	a,(hl)
+   85 03EC' E6 0C       	and	0ch
+   86 03EE' FE 02       	cp	2
+   87 03F0' 28 ??       	jr	z,h2
+   88 03F2' CD 0000#    	call	eprint
+   89 03F5' 20 20 20 49 	db	'   I - vorhandene Dateien ungefragt ignorieren',cr,lf,0
+   90 0426' FE 01       h2:	cp	1
+   91 0428' 28 ??       	jr	z,h3
+   92 042A' CD 0000#    	call	eprint
+   93 042D' 20 20 20 4F 	db	'   O - vorhandene Dateien ungefragt ersetzen',cr,lf,0
+   94 045C' FE 03       h3:	cp	3
+   95 045E' 28 ??       	jr	z,h4
+   96 0460' CD 0000#    	call	eprint
+   97 0463' 20 20 20 55 	db	'   U - vorhandene Dateien aktualisieren',cr,lf,0
+   98 048D' CB 4E       h4:	bit	1,(hl)
+   99 048F' 20 ??       	jr	nz,h1
+  100 0491' CD 0000#    	call	eprint
+  101 0494' 20 20 20 53 	db	'   S - sortiere Dateiliste',cr,lf,0
+  102 04B1'             h1:
+  103 04B1' CB 7E       	bit	7,(hl)
+  104 04B3' 20 ??       	jr	nz,h7
+  105 04B5' CD 0000#    	call	eprint
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  13
+UPUT    Z80
+
+  106 04B8' 20 20 20 4D 	db	'   M - Fortschrittsanzeige wie MTOOLs',cr,lf,0
+  107 04E0'             h7:
+  108 04E0' C7          	rst	0		; Abbruch
+  109                   
+  110                   ; Programmstart:
+  111                   
+  112 04E1' 2A 0006     START:	LD	HL,(BDOS+1)
+  113 04E4' 2E 00       	LD	L,0
+  114 04E6' F9          	LD	SP,HL		; Stack unterhalb BDOS legen
+  115 04E7' 25          	dec	h
+  116 04E8' 22 0000#    	ld	(tpaend),hl	; Obergzenze fuer Verzeichnispuffer
+  117 04EB' 3A 005D     	ld	a,(FCB1+1)	; 1. Parameter testen
+  118 04EE' FE 2F       	cp	'/'
+  119 04F0' CA 0259'    	jp	z,help		; // ist Hilfe
+  120 04F3' FE 20       	cp	' '
+  121 04F5' CA 0259'    	jp	z,help		; kein Parameter -> Hilfe
+  122                   	setopt			; Optionen setzen
+   14 04F8' 21 0016'   A	ld	hl,option	; Options-Flags
+   15 04FB' 11 006D    A	ld	de,fcb2+1	; Optionen in FCB2 testen
+   16 04FE' 06 0B      A	ld	b,11
+   17 0500' 1A         A	ld	a,(de)
+   18 0501' FE 2F      A	cp	'/'		; Einleitung fuer Optionen?
+   19 0503' 28 ??      A	jr	z,opt7
+   20 0505' 1A         Agetopt:	ld	a,(de)		; Optionen testen
+   21 0506' FE 2F      A	cp	'/'
+   22 0508' CA 0259'   A	jp	z,help		; // ist Hilfe
+   23 050B' FE 4F      A	cp	'O'		; ungefragt ueberschreiben?
+   24 050D' 20 ??      A	jr	nz,opt1
+   25 050F' CB D6      A	set	2,(hl)
+   26 0511' CB 9E      A	res	3,(hl)
+   27 0513' FE 54      Aopt1:	cp	'T'		; Textdatei?
+   28 0515' 20 ??      A	jr	nz,opt2
+   29 0517' CB E6      A	set	4,(hl)
+   30 0519' FE 42      Aopt2:	cp	'B'		; Binaerdatei?
+   31 051B' 20 ??      A	jr	nz,opt3
+   32 051D' CB A6      A	res	4,(hl)
+   33 051F' FE 56      Aopt3:	cp	'V'		; alte Daten anzeigen?
+   34 0521' 20 ??      A	jr	nz,opt4
+   35 0523' CB C6      A	set	0,(hl)
+   36 0525' FE 53      Aopt4:	cp	'S'		; Liste sortieren?
+   37 0527' 20 ??      A	jr	nz,opt5
+   38 0529' CB CE      A	set	1,(hl)
+   39 052B' FE 49      Aopt5:	cp	'I'		; vorhandene Datei ignorieren?
+   40 052D' 20 ??      A	jr	nz,opt6
+   41 052F' CB 96      A	res	2,(hl)
+   42 0531' CB DE      A	set	3,(hl)
+   43 0533' FE 57      Aopt6:	cp	'W'		; ausfuehrliche Anzeige?
+   44 0535' 20 ??      A	jr	nz,opt7
+   45 0537' CB EE      A	set	5,(hl)
+   46 0539' FE 4D      Aopt7:	cp	'M'		; Fortschrittsanzeige wie MTOOLs?
+   47 053B' 20 ??      A	jr	nz,opt8
+   48 053D' CB FE      A	set	7,(hl)
+   49 053F' FE 55      Aopt8:	cp	'U'		; vorhandene Dateien aktualisieren?
+   50 0541' 20 ??      A	jr	nz,opt9
+   51 0543' CB D6      A	set	2,(hl)
+   52 0545' CB DE      A	set	3,(hl)
+   53 0547' 13         Aopt9:	inc	de
+   54 0548' 10 BB      A	djnz	getopt
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  14
+UPUT    Z80
+
+  123 054A' CD 0000#    	call	putud		; DU: merken
+  124 054D' CD 0086'    	call	synchr		; Synchronisation
+  125 0550' DA 0000#    	jp	c,exit
+  126                   
+  127                   ; Test, ob USB-Stick angeschlossen ist:
+  128                   
+  129 0553' 3E 10       	LD	A,SCS		; Short CMD-Modus
+  130 0555' CD 0177'    	CALL	put
+  131 0558' CD 01C0'    	CALL	EXEC
+  132 055B' DA 0000#    	jp	c,exit		; Error
+  133                   
+  134 055E' 3E 91       	LD	A,IPH		; HEX- bzw. BIN-Modus
+  135 0560' CD 0177'    	CALL	put
+  136 0563' CD 01C0'    	CALL	EXEC
+  137 0566' DA 0000#    	jp	c,exit		; Error
+  138                   
+  139 0569' CD 01C0'    	call	exec		; Flash-Disk vorhanden?
+  140 056C' DA 0000#    	jp	c,exit
+  141                   
+  142                   ; Laufwerk + Userbereich einstellen:
+  143                   
+  144 056F' 3A 005C     	ld	a,(fcb1)
+  145 0572' B7          	or	a		; LW angegeben?
+  146 0573' 28 ??       	jr	z,nodrv
+  147 0575' 3D          	dec	a
+  148 0576' 5F          	ld	e,a
+  149 0577' 0E 0E       	ld	c,_seldsk	; LW anw{hlen
+  150 0579' CD 0005     	call	bdos
+  151 057C' 0E 0C       nodrv:	ld	c,_getver
+  152 057E' CD 0005     	call	bdos
+  153 0581' D6 22       	sub	22h		; DU: nur bei CP/M 2.2 (ZSDOS) akzeptieren
+  154 0583' 20 ??       	jr	nz,nousr
+  155 0585' 3A 006B     	ld	a,(fcb1+15)
+  156 0588' B7          	or	a
+  157 0589' 20 ??       	jr	nz,nousr	; DU-Error
+  158 058B' 3A 0069     	ld	a,(fcb1+13)
+  159 058E' 5F          	ld	e,a
+  160 058F' 0E 20       	ld	c,_setusr	; USER anw{hlen
+  161 0591' CD 0005     	call	bdos
+  162 0594'             nousr:
+  163                   
+  164                   ; Test ob Wildcards enthalten sind:
+  165                   
+  166 0594' 21 005D     	ld	hl,fcb1+1	; Dateiname
+  167 0597' 06 0B       	ld	b,11
+  168 0599' 0E 00       	ld	c,0		; keine Wildcard
+  169 059B' 7E          sw:	ld	a,(hl)
+  170 059C' 23          	inc	hl
+  171 059D' FE 3F       	cp	'?'		; Wildcard?
+  172 059F' 20 ??       	jr	nz,now
+  173 05A1' 0E 01       	ld	c,1		; Wildcard gefunden
+  174 05A3' 10 F6       now:	djnz	sw
+  175 05A5' 79          	ld	a,c
+  176 05A6' 32 0000#    	ld	(wild),a	; hier eine 1 wenn mehrdeutiger Dateiname
+  177 05A9' B7          	or	a
+  178 05AA' 28 ??       	jr	z,test0		; einzelne Datei direkt schreiben
+  179                   
+  180                   ; Verzeichnis lesen und sortieren:
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  15
+UPUT    Z80
+
+  181                   
+  182 05AC' CD 0000#    	call	rd_dir		; Verzeichnis einlesen
+  183 05AF' DA 0000#    	jp	c,exit		; Fehler
+  184 05B2' 2A 0000#    	ld	hl,(count)	; Anzahl gefundener Dateien
+  185 05B5' CD 0000#    	call	phlfdc
+  186 05B8' CD 0000#    	call	eprint
+  187 05BB' 20 44 61 74 	db	' Datei(en)',0
+  188 05C6' 7C          	ld	a,h
+  189 05C7' B5          	or	l
+  190 05C8' CA 0000#    	jp	z,exit		; keine Dateien entsprechen der Maske!
+  191 05CB' CD 0000#    	call	sort		; Eintraege sortieren
+  192 05CE' CD 0000#    	call	eprint
+  193 05D1' 2C 20 73 63 	db	', schreiben:',cr,lf,0
+  194 05E0' 21 0001     	ld	hl,1
+  195 05E3' 22 0000#    	ld	(counter),hl	; lfd. Datei = 1
+  196                   
+  197 05E6' 2A 0000#    next:	ld	hl,(table)
+  198 05E9' 5E          	ld	e,(hl)
+  199 05EA' 23          	inc	hl
+  200 05EB' 56          	ld	d,(hl)
+  201 05EC' 23          	inc	hl		; Tabelle gleich auf naechsten Eintrag setzen
+  202 05ED' 22 0000#    	ld	(table),hl
+  203 05F0' EB          	ex	de,hl		; Zeiger auf Eintrag jetzt in HL
+  204 05F1' 11 005D     	ld	de,fcb1+1
+  205 05F4' 01 000B     	ld	bc,11
+  206 05F7' ED B0       	ldir			; in FCB kopieren
+  207                   
+  208 05F9' CD 0000#    	call	eprint
+  209 05FC' 0D 0A       	db	cr,lf		; Leerzeile zwischen den Dateien
+  210 05FE' 44 61 74 65 	db	'Datei ',0
+  211 0605' 2A 0000#    	ld	hl,(counter)
+  212 0608' CD 0000#    	call	phlfdc		; Dateinummer
+  213 060B' CD 0000#    	call	eprint
+  214 060E' 20 76 6F 6E 	db	' von ',0
+  215 0614' 2A 0000#    	ld	hl,(count)
+  216 0617' CD 0000#    	call	phlfdc		; Gesamtanzahl
+  217 061A' CD 0000#    	call	eprint
+  218 061D' 3A 0D 0A 00 	db	':',cr,lf,0
+  219                   ;	ld	de,fcb1+1
+  220                   ;	call	pfn2		; Dateiname anzeigen
+  221                   
+  222                   ; Dateigroesse berechnen:
+  223                   
+  224 0621' 11 005C     test0:	ld	de,fcb1
+  225 0624' 0E 23       	ld	c,_calc
+  226 0626' CD 0005     	call	bdos		; Dateigroesse berechnen
+  227 0629' 2A 007D     	ld	hl,(fcb1+33)
+  228 062C' 22 0000#    	ld	(filesize0),hl
+  229 062F' 11 0007     	ld	de,7
+  230 0632' 19          	add	hl,de		; aufrunden auf volle KByte
+  231 0633' 3A 007F     	ld	a,(fcb1+35)
+  232 0636' 32 ????     	ld	(filesize0+2),a
+  233 0639' CE 00       	adc	a,0
+  234 063B' 06 03       	ld	b,3
+  235 063D' CB 3F       calc1:	srl	a
+  236 063F' CB 1C       	rr	h
+  237 0641' CB 1D       	rr	l		; *8
+  238 0643' 10 F8       	djnz	calc1
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  16
+UPUT    Z80
+
+  239 0645' B7          	or	a
+  240 0646' C2 0000#    	jp	nz,err3		; Datei ist 64MByte oder groesser
+  241 0649' 22 0000#    	ld	(kbyte),hl
+  242 064C' AF          	xor	a
+  243 064D' 32 ????     	ld	(filesize0+3),a
+  244                   
+  245                   ; Versuch, CP/M-Datei zu oeffnen (Test ob Datei vorhanden):
+  246                   
+  247 0650' 11 005C     	ld	de,fcb1
+  248 0653' CD 0000#    	call	initfcb
+  249 0656' CD 0000#    	call	f$open		; Datei vorhanden?
+  250 0659' C2 0000#    	jp	nz,err1
+  251                   
+  252                   ; Dateidatum-Stempel lesen (1. Modify, 2. Create, 3. Systemzeit):
+  253                   
+  254 065C' AF          	xor	a
+  255 065D' 32 0000#    	ld	(stempel),a	; kein Stempel vorhanden
+  256 0660' 0E 0C       	ld	c,_getver
+  257 0662' CD 0005     	call	bdos		; CP/M Version holen
+  258 0665' FE 22       	cp	22h
+  259 0667' 20 ??       	jr	nz,notzs	; nicht 2.2-kompatibel!
+  260 0669' 0E 30       	ld	c,_dosver
+  261 066B' CD 0005     	call	bdos		; erweiterte DOS-Version holen
+  262 066E' 7C          	ld	a,h
+  263 066F' FE 53       	cp	'S'		; ZSDOS?
+  264 0671' 28 ??       	jr	z,zsd1
+  265 0673' FE 44       	cp	'D'		; ZDDOS?
+  266 0675' 20 ??       	jr	nz,notzs
+  267 0677' 21 0000#    zsd1:	ld	hl,Datum1	; Datumstempel
+  268 067A' CD 0000#    	call	setdma		; als DMA-Adresse setzen
+  269 067D' AF          	xor	a
+  270 067E' 32 0068     	ld	(fcb1+12),a	; Extent 0
+  271 0681' 32 006A     	ld	(fcb1+14),a	; Datenmodul 0
+  272 0684' 11 005C     	ld	de,fcb1
+  273 0687' 0E 66       	ld	c,_GETDAT
+  274 0689' CD 0005     	call	bdos		; Datumstempel lesen
+  275 068C' 3D          	dec	a
+  276 068D' 20 ??       	jr	nz,zsd2		; Fehler beim Stempel lesen!
+  277 068F' 3A 0000#    	ld	a,(MONAT)
+  278 0692' B7          	or	a		; Teste Modify-Datum
+  279 0693' 20 ??       	jr	nz,zsd3		; -> OK (Monat nicht 0)
+  280 0695' 11 0000#    	ld	de,Datum3
+  281 0698' 21 0000#    	ld	hl,Datum1
+  282 069B' 01 0005     	ld	bc,5
+  283 069E' ED B0       	ldir			; Create-Datum verwenden
+  284 06A0' 3A 0000#    	ld	a,(MONAT)
+  285 06A3' B7          	or	a		; jetzt gueltig?
+  286 06A4' 20 ??       	jr	nz,zsd3		; -> OK
+  287 06A6' 11 0000#    zsd2:	ld	de,Datum3
+  288 06A9' 0E 62       	ld	c,_GETCLK
+  289 06AB' CD 0005     	call	bdos		; aktuelle Uhrzeit holen
+  290 06AE' 3D          	dec	a
+  291 06AF' 20 ??       	jr	nz,notzs	; Fehler beim Uhrzeit lesen!
+  292 06B1' 3E 01       zsd3:	ld	a,1
+  293 06B3' 32 0000#    	ld	(stempel),a	; Stempel jetzt gueltig
+  294 06B6'             notzs:
+  295                   
+  296                   ; CP/M-Datei oeffnen zum lesen:
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  17
+UPUT    Z80
+
+  297                   
+  298 06B6' 11 005C     	ld	de,fcb1
+  299 06B9' CD 0000#    	call	initfcb
+  300 06BC' CD 0000#    	call	f$open		; Datei oeffnen
+  301 06BF' C2 0000#    	jp	nz,err1
+  302                   
+  303                   ; Test ob Datei auf USB-Stick bereits vorhanden ist:
+  304                   
+  305 06C2' 3E 0E       	LD	A,OPR		; Open/read
+  306 06C4' CD 018A'    	call	outnam		; Datei zum Lesen oeffnen
+  307 06C7' 3E 0D       	LD	A,CR		; Kommandoabschluss
+  308 06C9' CD 0177'    	CALL	put
+  309 06CC' CD 012E'    	CALL	GET		; Ergebnis holen
+  310 06CF' DA 0000#    	jp	c,exit		; BRK oder TimeOut!
+  311 06D2' FE 3E       	CP	'>'		; Prompt?
+  312 06D4' 20 ??       	JR	NZ,del1		; nein, dann muss es ein Fehlercode sein
+  313 06D6' CD 012E'    	CALL	GET
+  314 06D9' DA 0000#    	jp	c,exit		; BRK oder TimeOut!
+  315 06DC' FE 0D       	CP	CR
+  316 06DE' 28 ??       	jr	z,del3		; kein Fehler beim Oeffnen = Datei vorhanden
+  317 06E0' C3 0000#    	jp	err7		; unerwartete Antwort
+  318                   
+  319 06E3' 47          del1:	ld	b,a		; erstes Zeichen merken
+  320 06E4' CD 012E'    	call	get		; zweites Zeichen holen
+  321 06E7' DA 0000#    	jp	c,exit		; BRK oder TimeOut
+  322 06EA' 4F          	ld	c,a		; zweites Zeichen merken
+  323 06EB' CD 012E'    	call	get		; drittes Zeichen holen
+  324 06EE' DA 0000#    	jp	c,exit		; BRK oder TimeOut
+  325 06F1' FE 0D       	cp	cr
+  326 06F3' C2 0000#    	jp	nz,err7		; unerwartete Antwort
+  327 06F6' 21 4649     	ld	hl,'FI'
+  328 06F9' ED 42       	sbc	hl,bc		; Datei nicht vorhanden (Firmware 3.64)
+  329 06FB' CA 0000#    	jp	z,send		; FI-Error erkannt
+  330 06FE' 21 4346     	ld	hl,'CF'
+  331 0701' A7          	and	a
+  332 0702' ED 42       	sbc	hl,bc		; Datei nicht vorhanden (Firmware 3.66)
+  333 0704' CA 0000#    	jp	z,send		; CF-Error erkannt
+  334 0707' 78          del2:	ld	a,b
+  335 0708' CD 01EC'    	CALL	CRTX
+  336 070B' 79          	ld	a,c
+  337 070C' CD 01EC'    	call	crtx		; Errorcode anzeigen
+  338 070F' CD 0000#    	call	eprint		; (kann eigentlich nur FO sein, wenn   )
+  339 0712' 2D 45 72 72 	db	'-Error',0	; (andere Datei zum Schreiben geoeffnet)
+  340 0719' C3 0000#    	jp	exit
+  341                   
+  342 071C' 3E 0A       del3:	ld	a,clf		; Close file
+  343 071E' CD 018A'    	call	outnam		; geoeffnete Datei schliessen
+  344 0721' CD 01C0'    	call	exec
+  345 0724' DA 0000#    	jp	c,exit		; Fehler
+  346                   
+  347                   ; Dateidatum der vorhandenen Datei ermitteln:
+  348                   
+  349 0727' 3E 2F       	ld	a,dirt		; DIRT <dateiname>
+  350 0729' CD 018A'    	call	outnam		; um Dateidatum zu ermitteln
+  351 072C' 3E 0D       	ld	a,cr
+  352 072E' CD 0177'    	call	put		; Kommando ausfuehren
+  353 0731' CD 012E'    	call	get		; 1. Zeichen abholen
+  354 0734' DA 0000#    	jp	c,exit		; Break oder TimeOut
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  18
+UPUT    Z80
+
+  355 0737' FE 0D       	cp	cr
+  356 0739' DA 0000#    	jp	c,err7		; nicht CR
+  357 073C' CD 012E'    OPU1:	call	get		; naechste Zeichen (Dateiname) abholen
+  358 073F' DA 0000#    	jp	c,exit		; Break oder TimeOut
+  359 0742' FE 0D       	cp	cr		; CR vor Leerzeichen?
+  360 0744' CA 0000#    	jp	z,err6		; dann Datei nicht vorhanden (CF-Error)
+  361 0747' FE 20       	cp	' '		; Trennzeichen?
+  362 0749' 20 F1       	jr	nz,OPU1
+  363 074B' 21 0000#    	ld	hl,data		; Dateidatum abholen
+  364 074E' 06 0A       	ld	b,10		; 10 Byte
+  365 0750' CD 012E'    OPU2:	call	get
+  366 0753' DA 0000#    	jp	c,exit		; Break oder TimeOut
+  367 0756' 77          	ld	(hl),a
+  368 0757' 23          	inc	hl
+  369 0758' 10 F6       	djnz	OPU2
+  370 075A' CD 012E'    OPU3:	call	get
+  371 075D' DA 0000#    	jp	c,exit
+  372 0760' FE 0D       	cp	cr		; Zeilenende erkannt?
+  373 0762' 20 F6       	jr	nz,OPU3
+  374 0764' CD 012E'    	call	get
+  375 0767' DA 0000#    	jp	c,exit
+  376 076A' FE 3E       	cp	'>'		; Prompt?
+  377 076C' C2 0000#    	jp	nz,err7
+  378 076F' CD 012E'    	call	get
+  379 0772' DA 0000#    	jp	c,exit
+  380 0775' FE 0D       	cp	cr
+  381 0777' C2 0000#    	jp	nz,err7
+  382 077A' 21 ????     	ld	hl,data+6	; dritter Wert
+  383 077D' 11 0000#    	ld	de,Datum4
+  384 0780' CD 0000#    	call	m2utim		; Aenderungs-Datum konvertieren
+  385                   
+  386 0783' CD 0000#    	call	eprint
+  387 0786' 56 6F 72 68 	db	'Vorhandene Datei ',0
+  388 0798' 11 005D     	ld	de,fcb1+1
+  389 079B' CD 0000#    	call	pfn2		; Dateiname anzeigen
+  390 079E' 21 0000#    	ld	hl,Datum4
+  391 07A1' CD 0000#    	call	danz		; Datum anzeigen
+  392 07A4' 21 0016'    	ld	hl,option
+  393 07A7' 7E          	ld	a,(hl)
+  394 07A8' E6 0C       	and	0ch		; Option bei vorhandener Datei
+  395 07AA' FE 0C       	cp	0ch		; Datum auswerten?
+  396 07AC' 20 ??       	jr	nz,vorh		; nein
+  397 07AE' 3A 0000#    	ld	a,(stempel)
+  398 07B1' B7          	or	a
+  399 07B2' 28 ??       	jr	z,noo		; kein Datum bei CP/M-Datei!
+  400                   
+  401                   ; Datum vergleichen:
+  402                   
+  403 07B4' 21 0000#    	ld	hl,Datum3	; Datum der zu schreibenden Datei
+  404 07B7' 11 0000#    	ld	de,Datum4	; Datum der vorhandenen Datei
+  405 07BA' 7E          	ld	a,(hl)		; Jahr (1978-2077)
+  406 07BB' D6 78       	sub	a,78h
+  407 07BD' 4F          	ld	c,a
+  408 07BE' 1A          	ld	a,(de)		; Jahr (1978-2077)
+  409 07BF' D6 78       	sub	a,78h
+  410 07C1' B9          	cp	c
+  411 07C2' DA 0000#    	jp	c,delete	; Jahr neuer -> ersetzen
+  412 07C5' 20 ??       	jr	nz,ign		; Jahr aelter -> ignorieren
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  19
+UPUT    Z80
+
+  413 07C7' 06 04       	ld	b,4		; 4 weitere Bytes vergleichen
+  414 07C9' 23          dcomp:	inc	hl
+  415 07CA' 13          	inc	de
+  416 07CB' 1A          	ld	a,(de)
+  417 07CC' BE          	cp	(hl)
+  418 07CD' DA 0000#    	jp	c,delete	; neuer -> ersetzen
+  419 07D0' 20 ??       	jr	nz,ign		; aelter -> ignorieren
+  420 07D2' 10 F5       	djnz	dcomp
+  421 07D4' CD 0000#    ign:	call	eprint
+  422 07D7' 20 6B 65 69 	db	' keine Aktualisierung.',cr,lf,0
+  423 07F0' C3 0000#    	jp	zsx		; gleich -> ignorieren
+  424                   
+  425 07F3' CB 5E       vorh:	bit	3,(hl)		; ignorieren?
+  426 07F5' 28 ??       	jr	z,noi
+  427 07F7' CD 0000#    	call	eprint
+  428 07FA' 20 77 69 72 	db	' wird ignoriert.',cr,lf,0
+  429 080D' C3 0000#    	jp	zsx
+  430                   	;
+  431 0810' CB 56       noi:	bit	2,(hl)		; ungefragt ueberschreiben?
+  432 0812' 20 ??       	jr	nz,delete	; ja
+  433                   	;
+  434 0814' CD 0000#    noo:	call	eprint
+  435 0817' 0D 0A 20 20 	db	cr,lf,'    ersetzen mit ',0
+  436 082B' 11 005D     	ld	de,fcb1+1
+  437 082E' CD 0000#    	call	pfn2		; Dateiname anzeigen
+  438 0831' 3A 0000#    	ld	a,(stempel)	; gueltiger Datumstempel?
+  439 0834' B7          	or	a
+  440 0835' 21 0000#    	ld	hl,Datum3
+  441 0838' C4 0000#    	call	nz,danz		; ja, Datum anzeigen
+  442 083B' CD 0000#    	call	eprint
+  443 083E' 20 28 6A 2F 	db	' (j/n)? ',0
+  444 0847' CD 0000#    ask:	call	capin
+  445 084A' FE 03       	cp	3		; Break?
+  446 084C' CA 0000#    	jp	z,exit		; -> Abbruch
+  447 084F' FE 4E       	cp	'N'
+  448 0851' 28 ??       	jr	z,TOK		; nein
+  449 0853' FE 4A       	cp	'J'
+  450 0855' 20 F0       	jr	nz,ask
+  451 0857' F5          tok:	push	af
+  452 0858' CD 0000#    	call	cout		; Zeichen anzeigen
+  453 085B' F1          	pop	af
+  454 085C' FE 4A       	cp	'J'
+  455 085E' 28 ??       	jr	z,delete	; diese Datei loeschen
+  456 0860' CD 0000#    	call	eprint
+  457 0863' 0D 0A 00    	db	cr,lf,0		; neue Zeile und
+  458 0866' C3 0000#    	jp	zsx		; zur naechsten Datei
+  459                   	;
+  460 0869' 3E 07       delete:	ld	a,dlf		; Delete file
+  461 086B' CD 018A'    	call	outnam		; Datei loeschen
+  462 086E' 3E 0D       	LD	A,CR		; Kommandoabschluss
+  463 0870' CD 0177'    	CALL	put
+  464 0873' CD 012E'    	CALL	GET		; Ergebnis holen
+  465 0876' DA 0000#    	jp	c,exit		; BRK oder TimeOut!
+  466 0879' FE 3E       	CP	'>'		; Prompt?
+  467 087B' 20 ??       	JR	NZ,del5		; nein, dann muss es ein Fehlercode sein
+  468 087D' CD 012E'    	CALL	GET
+  469 0880' DA 0000#    	jp	c,exit		; BRK oder TimeOut!
+  470 0883' FE 0D       	CP	CR
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  20
+UPUT    Z80
+
+  471 0885' C2 0000#    	jp	nz,err7		; unerwartete Antwort
+  472                   
+  473 0888' 21 0016'    	ld	hl,option	; war das
+  474 088B' CB 56       	bit	2,(hl)		; ungefragt ueberschreiben?
+  475 088D' 28 ??       	jr	z,del4		; nein!
+  476 088F' CD 0000#    	call	eprint
+  477 0892' 20 77 69 72 	db	' wird ersetzt.',0
+  478 08A1' CD 0000#    del4:	call	eprint
+  479 08A4' 0D 0A 00    	db	cr,lf,0		; kein Fehler beim Loeschen!
+  480 08A7' 18 ??       	jr	send		; -> Datei senden
+  481                   
+  482 08A9' 47          del5:	ld	b,a		; erstes Zeichen merken
+  483 08AA' CD 012E'    	call	get		; zweites Zeichen holen
+  484 08AD' DA 0000#    	jp	c,exit		; BRK oder TimeOut
+  485 08B0' 4F          	ld	c,a		; zweites Zeichen merken
+  486 08B1' CD 012E'    	call	get		; drittes Zeichen holen
+  487 08B4' DA 0000#    	jp	c,exit		; BRK oder TimeOut
+  488 08B7' FE 0D       	cp	cr
+  489 08B9' C2 0000#    	jp	nz,err7		; unerwartete Antwort
+  490 08BC' 21 524F     	ld	hl,'RO'
+  491 08BF' ED 42       	sbc	hl,bc
+  492 08C1' C2 0707'    	jp	nz,del2		; nicht RO-Error = Datei schreibgeschuetzt
+  493 08C4' CD 0000#    	call	eprint
+  494 08C7' 20 2D 20 69 	db	' - ist schreibgeschuetzt!',cr,lf,0
+  495 08E3' C3 0000#    	jp	zsx
+  496                   
+  497                   ; Senden der Datei einleiten:
+  498                   
+  499 08E6' CD 0000#    send:	call	eprint
+  500 08E9' 53 63 68 72 	db	'Schreibe Datei ',0
+  501 08F9' 11 005D     	ld	de,fcb1+1
+  502 08FC' CD 0000#    	call	pfn2		; Dateiname anzeigen
+  503 08FF' CD 0000#    	call	eprint
+  504 0902' 20 28 00    	db	' (',0
+  505 0905' 2A 0000#    	ld	hl,(kbyte)	; Dateigroesse in KByte
+  506 0908' CD 0000#    	call	phlfdc		; anzeigen
+  507 090B' CD 0000#    	call	eprint
+  508 090E' 20 4B 42 79 	db	' KByte',0
+  509                   
+  510 0915' 3A 0000#    	ld	a,(stempel)	; gueltiger Datumstempel?
+  511 0918' B7          	or	a
+  512 0919' 21 0000#    	ld	hl,Datum3
+  513 091C' C4 0000#    	call	nz,danz		; ja, Datum anzeigen
+  514 091F' CD 0000#    	call	eprint
+  515 0922' 29 0D 0A 00 	db	')',cr,lf,0
+  516                   
+  517 0926' 3E 09       	LD	A,OPW		; Open/write
+  518 0928' CD 018A'    	call	outnam		; Datei zum schreiben oeffnen
+  519 092B' 3A 0000#    	ld	a,(stempel)
+  520 092E' B7          	or	a
+  521 092F' 28 ??       	jr	z,send2		; kein Datumstempel vorhanden
+  522 0931' 11 0000#    	ld	de,Datum3
+  523 0934' 21 0000#    	ld	hl,DOSDAT
+  524 0937' CD 0000#    	call	u2mtim		; Datum fuer DOS konvertieren
+  525 093A' 20 ??       	jr	nz,send2	; Fehler beim konvertieren!
+  526 093C' 3E 20       	ld	a,' '		; Leerzeichen
+  527 093E' CD 0177'    	call	put
+  528 0941' 21 ????     	LD	HL,DOSDAT+3	; Datum im DOS-Format
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  21
+UPUT    Z80
+
+  529 0944' 06 04       	LD	B,4		; 4 Byte = 32 Bit
+  530 0946' 7E          send1:	LD	A,(HL)
+  531 0947' 2B          	dec	HL
+  532 0948' CD 0177'    	CALL	put
+  533 094B' 10 F9       	DJNZ	send1
+  534 094D' CD 01C0'    send2: 	call	exec		; Kommando-Abschluss
+  535 0950' DA 0000#    	jp	c,exit		; Fehler
+  536                   
+  537                   ; Daten schreiben, Sektor fuer Sektor...
+  538                   
+  539 0953' 11 0000#    	ld	de,filesize
+  540 0956' 21 0000#    	ld	hl,filesize0
+  541 0959' 01 0004     	ld	bc,4
+  542 095C' ED B0       	ldir			; Dateigroesse in Laufvariable kopieren
+  543 095E' 3A 0016'    	ld	a,(option)
+  544 0961' 07          	rlca
+  545 0962' D4 0000#    	call	nc,PROZ		; Anfangsanzeige in Prozent
+  546                   
+  547 0965' 21 0080     	ld	hl,defdma	; Standardpuffer einstellen
+  548 0968' CD 0000#    	call	setdma
+  549 096B' 21 0000#    WRITE:	ld	hl,filesize	; Dateigroesse
+  550 096E' 7E          	ld	a,(hl)
+  551 096F' 23          	inc	hl
+  552 0970' B6          	or	(hl)
+  553 0971' 23          	inc	hl
+  554 0972' B6          	or	(hl)
+  555 0973' CA 0000#    	jp	z,close		; 0 => fertig
+  556                   
+  557 0976' 11 005C     	ld	de,fcb1
+  558 0979' CD 0000#    	call	f$read		; Sektor lesen
+  559 097C' C2 0000#    	jp	nz,err9		; Lesefehler (oder unerwartetes Dateiende)
+  560 097F' 21 0016'    	ld	hl,option
+  561 0982' CB 66       	bit	4,(hl)		; Textdatei?
+  562 0984' 06 80       	ld	b,128
+  563 0986' 28 ??       	jr	z,wri0		; nein, dann immer voller Block
+  564 0988' 21 0080     	ld	hl,defdma
+  565 098B' 06 00       	ld	b,0
+  566 098D' 7E          wr10:	ld	a,(hl)
+  567 098E' FE 1A       	cp	eof		; Endezeichen?
+  568 0990' 28 ??       	jr	z,wr11
+  569 0992' 23          	inc	hl
+  570 0993' 04          	inc	b		; Zeichen zaehlen
+  571 0994' 78          	ld	a,b
+  572 0995' FE 80       	cp	128
+  573 0997' 28 ??       	jr	z,wri0		; kein EOF im gesamten Block
+  574 0999' 18 F2       	jr	wr10
+  575 099B' 78          wr11:	ld	a,b
+  576 099C' B7          	or	a
+  577 099D' 28 ??       	jr	z,close		; keine Zeichen in diesem Block -> fertig
+  578 099F' 3E 08       wri0:	LD	A,WRF		; Write to File
+  579 09A1' CD 0177'    	CALL	put
+  580 09A4' 3E 20       	LD	A,' '
+  581 09A6' CD 0177'    	CALL	put
+  582 09A9' AF          	XOR	A
+  583 09AA' CD 0177'    	CALL	put
+  584 09AD' AF          	XOR	A
+  585 09AE' CD 0177'    	CALL	put
+  586 09B1' AF          	XOR	A
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  22
+UPUT    Z80
+
+  587 09B2' CD 0177'    	CALL	put
+  588 09B5' 78          	LD	A,B		; Sektorgroesse
+  589 09B6' CD 0177'    	CALL	put
+  590 09B9' 3E 0D       	LD	A,CR
+  591 09BB' CD 0177'    	CALL	put
+  592 09BE' 21 0080     	ld	hl,defdma	; DMA-Puffer
+  593 09C1' 78          	ld	a,b
+  594 09C2' 32 0000#    	ld	(fsize),a	; Anzahl/Block merken
+  595 09C5' 7E          WRI1:	LD	A,(HL)
+  596 09C6' 23          	INC	HL
+  597 09C7' CD 0177'    	CALL	put
+  598 09CA' 10 F9       	DJNZ	WRI1
+  599 09CC' CD 01C5'    	call	ex1		; Prompt, cr testen
+  600 09CF' DA 0000#    	jp	c,exit		; BRK/TimeOut
+  601                   
+  602 09D2' 21 0000#    	ld	hl,filesize	; (restliche) Dateigroesse
+  603 09D5' 7E          	ld	a,(hl)
+  604 09D6' D6 01       	sub	1		; -1 Sektor
+  605 09D8' 77          	ld	(hl),a
+  606 09D9' 23          	inc	hl
+  607 09DA' 7E          	ld	a,(hl)
+  608 09DB' DE 00       	sbc	a,0
+  609 09DD' 77          	ld	(hl),a
+  610 09DE' 23          	inc	hl
+  611 09DF' 7E          	ld	a,(hl)
+  612 09E0' DE 00       	sbc	a,0
+  613 09E2' 77          	ld	(hl),a
+  614                   
+  615 09E3' CD 0000#    	call	proz		; Fortschrittsanzeige
+  616 09E6' 3A 0000#    	ld	a,(fsize)
+  617 09E9' FE 80       	cp	128		; war das ein voller Block?
+  618 09EB' CA 096B'    	jp	z,WRITE		; ja, dann koennten weitere folgen
+  619                   
+  620                   ; Datei schliessen:
+  621                   
+  622 09EE' 11 005C     close:	ld	de,fcb1
+  623 09F1' CD 0000#    	call	f$close		; Datei schliessen
+  624 09F4' C2 0000#    	jp	nz,err5
+  625 09F7' 3E 0A       	LD	A,CLF		; Close File (USB)
+  626 09F9' CD 018A'    	CALL	outnam		; Datei schliessen
+  627 09FC' CD 01C0'    	call	exec
+  628 09FF' DA 0000#    	jp	c,exit		; Fehler
+  629 0A02' CD 0000#    	call	eprint
+  630 0A05' 20 2D 20 4F 	db	' - OK.',cr,lf,0
+  631 0A0E' 2A 0000#    	ld	hl,(count2)
+  632 0A11' 23          	inc	hl		; uebertragene Dateien zaehlen
+  633 0A12' 22 0000#    	ld	(count2),hl
+  634 0A15' 3A 0000#    zsx:	ld	a,(wild)
+  635 0A18' B7          	or	a
+  636 0A19' CA 0000#    	jp	z,exit		; Einzeldatei -> fertig
+  637 0A1C' 2A 0000#    	ld	hl,(count)
+  638 0A1F' ED 5B 0000# 	ld	de,(counter)
+  639 0A23' ED 52       	sbc	hl,de
+  640 0A25' 28 ??       	jr	z,zus		; letzte Datei -> fertig
+  641 0A27' 13          	inc	de
+  642 0A28' ED 53 0000# 	ld	(counter),de
+  643 0A2C' C3 05E6'    	jp	next		; wiederholen fuer naechste Datei
+  644                   	;
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  23
+UPUT    Z80
+
+  645 0A2F' CD 0000#    zus:	call	eprint
+  646 0A32' 0D 0A 5A 75 	db	cr,lf,'Zusammenfassung:  ',0
+  647 0A47' 2A 0000#    	ld	hl,(count2)
+  648 0A4A' CD 0000#    	call	phlfdc		; Anzahl
+  649 0A4D' CD 0000#    	call	eprint
+  650 0A50' 20 76 6F 6E 	db	' von ',0
+  651 0A56' 2A 0000#    	ld	hl,(count)
+  652 0A59' CD 0000#    	call	phlfdc		; Gesamtanzahl
+  653 0A5C' CD 0000#    	call	eprint
+  654 0A5F' 20 44 61 74 	db	' Dateien uebertragen.',cr,lf,0
+  655 0A77' C3 0000#    	jp	exit
+  656                   ;-------------------------------------------------------------------------------
+  657                   ;
+  658                   ; Fehlerbehandlung:
+  659                   ;
+  660 0A7A' CD 0000#    err1:	call	eprint
+  661 0A7D' 44 61 74 65 	db	'Datei nicht vorhanden',cr,lf,0
+  662 0A95' C3 0000#    	jp	exit
+  663                   ;
+  664 0A98' CD 0000#    err3:	call	eprint
+  665 0A9B' 44 61 74 65 	db	'Datei ist 64 MByte oder groesser!',cr,lf,0
+  666 0ABF' C3 0000#    	jp	exit
+  667                   ;
+  668 0AC2' CD 0000#    err5:	call	eprint
+  669 0AC5' 44 61 74 65 	db	'Datei kann nicht geschlossen werden',cr,lf,0
+  670 0AEB' C3 0000#    	jp	exit
+  671                   ;
+  672 0AEE' CD 0000#    err6:	call	eprint
+  673 0AF1' 44 61 74 65 	db	'Datei ',0
+  674 0AF8' 11 005D     	ld	de,fcb1+1
+  675 0AFB' CD 0000#    	call	pfn2		; Dateiname anzeigen
+  676 0AFE' CD 0000#    	call	eprint
+  677 0B01' 20 61 75 66 	db	' auf USB-Stick nicht vorhanden',cr,lf,0
+  678 0B22' 18 ??       	jr	exit
+  679                   ;
+  680 0B24' CD 0000#    err7:	call	eprint
+  681 0B27' 55 6E 65 72 	db	'Unerwartete Vinculum-Antwort',cr,lf,0
+  682 0B46' 18 ??       	jr	exit
+  683                   ;
+  684 0B48' CD 0000#    err8:	call	eprint
+  685 0B4B' 54 50 41 2D 	db	'TPA-Speicherueberlauf',cr,lf,0
+  686 0B63' 18 ??       	jr	exit
+  687                   ;
+  688 0B65' CD 0000#    err9:	call	eprint
+  689 0B68' 44 61 74 65 	db	'Datei Lesefehler',cr,lf,0
+  690                   ;
+  691 0B7B' 3E 11       exit:	LD	A,ECS		; Extend. CMD-Modus
+  692 0B7D' CD 0177'    	CALL	put
+  693 0B80' 3E 0D       	LD	A,CR
+  694 0B82' CD 0177'    	CALL	put
+  695 0B85' CD 0000#    	call	condin		; evtl. anstehendes BRK abfangen
+  696 0B88' CD 0000#    	call	getud		; DU: regenerieren
+  697 0B8B' CD 0258'    	call	deinit		; Treiber deaktivieren
+  698 0B8E' C7          	rst	0
+  699                   
+  700                   ; Dateidatum anzeigen:
+  701                   ; PE:	HL	Zeiger auf Datumsfeld im CP/M-Format
+  702                   
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  24
+UPUT    Z80
+
+  703 0B8F' CD 0000#    danz:	call	eprint
+  704 0B92' 2C 20 00    	db	', ',0
+  705 0B95' 23          	inc	hl
+  706 0B96' 23          	inc	hl
+  707 0B97' 7E          	ld	a,(hl)		; Tag
+  708 0B98' CD 0000#    	call	pa2hc
+  709 0B9B' 3E 2E       	ld	a,'.'
+  710 0B9D' CD 0000#    	call	cout
+  711 0BA0' 2B          	dec	hl
+  712 0BA1' 7E          	ld	a,(hl)		; Monat
+  713 0BA2' CD 0000#    	call	pa2hc
+  714 0BA5' 3E 2E       	ld	a,'.'
+  715 0BA7' CD 0000#    	call	cout
+  716 0BAA' 2B          	dec	hl
+  717 0BAB' 7E          	ld	a,(hl)		; Jahr
+  718 0BAC' FE 78       	cp	78h
+  719 0BAE' 3E 19       	ld	a,19h		; Jahrhundert 1978-1999
+  720 0BB0' CE 00       	adc	a,0
+  721 0BB2' 27          	daa			; oder 2000-2077
+  722 0BB3' CD 0000#    	call	pa2hc
+  723 0BB6' 7E          	ld	a,(hl)		; Jahr
+  724 0BB7' CD 0000#    	call	pa2hc
+  725 0BBA' 3E 20       	ld	a,' '
+  726 0BBC' CD 0000#    	call	cout
+  727 0BBF' 23          	inc	hl
+  728 0BC0' 23          	inc	hl
+  729 0BC1' 23          	inc	hl
+  730 0BC2' 7E          	ld	a,(hl)		; Stunde
+  731 0BC3' CD 0000#    	call	pa2hc
+  732 0BC6' 3E 3A       	ld	a,':'
+  733 0BC8' CD 0000#    	call	cout
+  734 0BCB' 23          	inc	hl
+  735 0BCC' 7E          	ld	a,(hl)		; Minute
+  736 0BCD' CD 0000#    	call	pa2hc
+  737 0BD0' C9          	ret
+  738                   
+  739                   ; Verzeichnis einlesen von CP/M-Laufwerk:
+  740                   ;
+  741                   ; PA:	CY=1	Fehler
+  742                   
+  743 0BD1' CD 0000#    rd_dir:	call	eprint
+  744 0BD4' 53 63 61 6E 	db	'Scanne Directory, ',0
+  745 0BE7' 21 0080     	ld	hl,defdma	; Standardpuffer einstellen
+  746 0BEA' CD 0000#    	call	setdma
+  747 0BED' 21 0000#    	ld	hl,$memry	; Directoryeintraege hier ablegen
+  748 0BF0' 22 0000#    	ld	(pointer),hl	; Zeiger setzen
+  749 0BF3' 21 0000     	ld	hl,0
+  750 0BF6' 22 0000#    	ld	(count),hl	; Anzahl
+  751 0BF9' 22 0000#    	ld	(count2),hl	; Zaehler
+  752 0BFC' 11 005C     	LD	DE,FCB1		; FCB-Adresse von Dateimaske
+  753 0BFF' 0E 11       	LD	C,_FIRST
+  754 0C01' CD 0005     	CALL	BDOS		; ersten Eintrag suchen
+  755 0C04' FE FF       	CP	0FFH
+  756 0C06' C8          	ret	z		; keinen Eintrag gefunden
+  757                   
+  758                   ; Eintrag in Puffer kopieren (ohne Verzeichnisse):
+  759                   
+  760 0C07' 21 0080     DIR2:	LD	HL,DEFDMA
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  25
+UPUT    Z80
+
+  761 0C0A' 0F          	RRCA			; Verzeichniscode
+  762 0C0B' 0F          	RRCA
+  763 0C0C' 0F          	RRCA			; *32
+  764 0C0D' 4F          	ld	c,a
+  765 0C0E' 0C          	inc	c		; ab Dateiname
+  766 0C0F' 06 00       	ld	b,0
+  767 0C11' 09          	ADD	HL,bc		; Position berechnen
+  768 0C12' ED 5B 0000# 	ld	de,(pointer)	; Verzeichnispuffer
+  769 0C16' 06 0B       	ld	b,11		; max. Laenge 8.3 (ohne Punkt)
+  770 0C18' 7E          dir3:	ld	a,(hl)
+  771 0C19' E6 7F       	and	7fh		; Attribute ruecksetzen
+  772 0C1B' 12          	ld	(de),a
+  773 0C1C' 13          	inc	de
+  774 0C1D' 23          	inc	hl
+  775 0C1E' 10 F8       	djnz	dir3		; wiederholen fuer gesamten Dateinamen
+  776                   
+  777                   ; Test auf Ausschlussliste:
+  778                   
+  779 0C20' D5          	push	de
+  780 0C21' 21 0018'    	ld	hl,excl		; Liste auszuschliessender Dateien
+  781 0C24' 0E 0A       	ld	c,10		; 10 Dateinamen
+  782 0C26' ED 5B 0000# cd1:	ld	de,(pointer)	; neuer Testkandidat
+  783 0C2A' 06 0B       	ld	b,11		; jeder mit Laenge 8+3
+  784 0C2C' 3E 3F       cd2:	ld	a,'?'
+  785 0C2E' BE          	cp	(hl)
+  786 0C2F' 28 ??       	jr	z,cd3		; passt immer
+  787 0C31' 1A          	ld	a,(de)
+  788 0C32' BE          	cp	(hl)
+  789 0C33' 20 ??       	jr	nz,cd4		; nicht ausschliessen
+  790 0C35' 23          cd3:	inc	hl
+  791 0C36' 13          	inc	de
+  792 0C37' 10 F3       	djnz	cd2
+  793 0C39' D1          	pop	de
+  794 0C3A' 18 ??       	jr	dir4		; Datei ausschliessen!
+  795                   	;
+  796 0C3C' 23          cd4:	inc	hl
+  797 0C3D' 10 FD       	djnz	cd4		; den Rest ignorieren
+  798 0C3F' 0D          	dec	c
+  799 0C40' 20 E4       	jr	nz,cd1		; noch einmal testen
+  800 0C42' D1          	pop	de
+  801                   
+  802 0C43' ED 53 0000# 	ld	(pointer),de	; neuer Zeiger jetzt gueltig
+  803 0C47' 2A 0000#    	ld	hl,(tpaend)
+  804 0C4A' ED 52       	sbc	hl,de
+  805 0C4C' DA 0B48'    	jp	c,err8		; TPA-Ueberlauf!
+  806 0C4F' 2A 0000#    	ld	hl,(count)
+  807 0C52' 23          	inc	hl		; Eintraege zaehlen
+  808 0C53' 22 0000#    	ld	(count),hl
+  809 0C56' 0E 12       dir4:	LD	C,_NEXT
+  810 0C58' CD 0005     	CALL	BDOS		; naechsten Eintrag suchen
+  811 0C5B' FE FF       	CP	0FFH
+  812 0C5D' 20 A8       	JR	NZ,DIR2		; -> weiterer Eintrag vorhanden
+  813 0C5F' C9          	RET
+  814                   
+  815                   ; eingelesenes Verzeichnis alphabetisch sortieren
+  816                   
+  817                   ; 1. Zeigertabelle erzeugen:
+  818                   
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  26
+UPUT    Z80
+
+  819 0C60' 2A 0000#    sort:	ld	hl,(pointer)	; Ende der Dateinamen ist
+  820 0C63' 22 0000#    	ld	(table),hl	; Beginn der Zeigertabelle
+  821 0C66' ED 5B 0000# 	ld	de,(count)
+  822 0C6A' 19          	add	hl,de
+  823 0C6B' 19          	add	hl,de		; + 2 Byte je Eintrag
+  824 0C6C' EB          	ex	de,hl
+  825 0C6D' 2A 0000#    	ld	hl,(tpaend)	; TPA-Ende
+  826 0C70' ED 52       	sbc	hl,de
+  827 0C72' DA 0B48'    	jp	c,err8		; das reicht nicht!
+  828                   
+  829 0C75' 2A 0000#    	ld	hl,(count)	; Anzahl Elemente
+  830 0C78' E5          	push	hl
+  831 0C79' 11 0000#    	ld	de,$memry	; Tabelle der Namen
+  832 0C7C' 2A 0000#    	ld	hl,(table)	; Zeigertabelle
+  833 0C7F' 01 000B     	ld	bc,11		; Laenge eines Eintrages
+  834 0C82' 73          BLORD:	ld	(hl),e
+  835 0C83' 23          	inc	hl
+  836 0C84' 72          	ld	(hl),d
+  837 0C85' 23          	inc	hl
+  838 0C86' EB          	ex	de,hl
+  839 0C87' 09          	add	hl,bc		; naechstes Element
+  840 0C88' EB          	ex	de,hl
+  841 0C89' E3          	ex	(sp),hl
+  842 0C8A' 2B          	dec	hl		; noch ein Element?
+  843 0C8B' 7C          	ld	a,h
+  844 0C8C' B5          	or	l
+  845 0C8D' E3          	ex	(sp),hl
+  846 0C8E' 20 F2       	jr	nz,BLORD
+  847 0C90' E1          	pop	hl
+  848 0C91' 2A 0000#    	ld	hl,(count)	; Anzahl
+  849 0C94' 2B          	dec	hl
+  850 0C95' 7C          	ld	a,h
+  851 0C96' B5          	or	l
+  852 0C97' C8          	ret	z		; nicht sortieren wenn Anzahl=1
+  853 0C98' 21 0016'    	ld	hl,option
+  854 0C9B' CB 4E       	bit	1,(hl)
+  855 0C9D' C8          	ret	z		; unsortiert abarbeiten
+  856 0C9E' CD 0000#    	call	eprint
+  857 0CA1' 2C 20 73 6F 	db	', sortieren',0
+  858                   
+  859                   ;
+  860                   ; 2. Sortieren ueber Zeiger-Methode
+  861                   ; (Shell-SORT von "Software Tools", Kernigan/Plaugher, (c) 1976)
+  862                   ;
+  863 0CAD' 2A 0000#    	ld	hl,(count)	; Anzahl Elemente
+  864 0CB0' 22 0000#    	ld	(GAP),hl	; GAP fuer ersten Vergleich initialisieren
+  865 0CB3' 2A 0000#    SORT0:	ld	hl,(GAP)
+  866 0CB6' CB 3C       	srl	h
+  867 0CB8' CB 1D       	rr	l		; GAP:=GAP/2
+  868 0CBA' 7D          	ld	a,l
+  869 0CBB' B4          	or	h
+  870 0CBC' C8          	ret	z		; fertig, wenn GAP/2=0
+  871 0CBD' CB 45       	bit	0,l		; GAP ungeradzahlig?
+  872 0CBF' 20 ??       	jr	nz,SORT1
+  873 0CC1' 2B          	dec	hl		; GAP ungerade machen
+  874 0CC2' 22 0000#    SORT1:	ld	(GAP),hl
+  875 0CC5' 22 0000#    SORT2:	ld	(J),hl		; J:=GAP
+  876                   ;
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  27
+UPUT    Z80
+
+  877                   ; For (J=GAP+1; J<=N; J=J+1)
+  878                   ;
+  879 0CC8' 2A 0000#    RIGHT:	ld	hl,(J)
+  880 0CCB' 23          	inc	hl		; J:=J+1
+  881 0CCC' 22 0000#    	ld	(J),hl
+  882 0CCF' EB          	ex	de,hl		; DE=(J)
+  883 0CD0' 2A 0000#    	ld	hl,(count)
+  884 0CD3' B7          	or	a
+  885 0CD4' ED 52       	sbc	hl,de		; Anzahl-J
+  886 0CD6' 38 DB       	jr	c,SORT0		; neu starten, wenn I > N
+  887                   ;
+  888                   ; For (I=J-GAP; J>0; I=J-GAP)
+  889                   ;
+  890 0CD8' 2A 0000#    LEFT:	ld	hl,(GAP)
+  891 0CDB' EB          	ex	de,hl
+  892 0CDC' ED 52       	sbc	hl,de		; I:=J-GAP
+  893 0CDE' 38 E8       	jr	c,RIGHT		; wenn J < 0
+  894 0CE0' 28 E6       	jr	z,RIGHT		; wenn J = 0
+  895                   ;
+  896                   ; Set JG=I+GAP
+  897                   ;
+  898 0CE2' EB          	ex	de,hl
+  899 0CE3' 19          	add	hl,de		; JG:=I+GAP
+  900                   ;
+  901                   ; If (I) <= (JG) then Break else Exchange
+  902                   ;
+  903 0CE4' E5          	push	hl
+  904 0CE5' D5          	push	de
+  905 0CE6' CD 0000#    	call	COMPAR		; Vergleich
+  906 0CE9' D1          	pop	de
+  907 0CEA' E1          	pop	hl
+  908 0CEB' 28 DB       	jr	z,RIGHT		; Dateiname gleich (sollte nicht vorkommen!)
+  909 0CED' 30 D9       	jr	nc,RIGHT	; richtig sortiert
+  910 0CEF' D5          	push	de
+  911 0CF0' CD 0000#    	call	SWAP		; Austausch
+  912 0CF3' D1          	pop	de
+  913 0CF4' 18 E2       	jr	LEFT		; zurueck furr weitere Tests
+  914                   ;
+  915                   ; Zeiger zweier Elemente austauschen
+  916                   ; PE:	HL,DE	Nummer der Elemente
+  917                   ; VR:	AF,BC,DE,HL
+  918                   ;
+  919 0CF6' ED 4B 0000# SWAP:	ld	bc,(table)	; Adresstabelle
+  920 0CFA' 0B          	dec	bc
+  921 0CFB' 0B          	dec	bc
+  922 0CFC' 29          	add	hl,hl		; *2
+  923 0CFD' 09          	add	hl,bc		; 1. Element
+  924 0CFE' EB          	ex	de,hl
+  925 0CFF' 29          	add	hl,hl		; *2
+  926 0D00' 09          	add	hl,bc		; 2. Element
+  927 0D01' CD 0000#    	call	SWAP1		; erst aufrufen, dann reinlaufen
+  928 0D04' 4E          SWAP1:	ld	c,(hl)
+  929 0D05' 1A          	ld	a,(de)
+  930 0D06' EB          	ex	de,hl
+  931 0D07' 71          	ld	(hl),c
+  932 0D08' 12          	ld	(de),a
+  933 0D09' 23          	inc	hl
+  934 0D0A' 13          	inc	de
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  28
+UPUT    Z80
+
+  935 0D0B' C9          	RET
+  936                   ;
+  937                   ; Zwei Eintraege ueber deren Zeiger vergleichen
+  938                   ; PE:	HL,DE	Nummer der Elemente
+  939                   ; PA:	CY=1	(HL) > (DE)
+  940                   ;	Z=1	Namen gleich, dann
+  941                   ;		CY'=1	(HL) > (DE) bei Vergleich der EXT-Nummer
+  942                   ; VR:	AF,BC,DE,HL
+  943                   ;
+  944 0D0C' ED 4B 0000# COMPAR:	ld	bc,(table)	; Adresstabelle
+  945 0D10' 0B          	dec	bc
+  946 0D11' 0B          	dec	bc
+  947 0D12' 29          	add	hl,hl		; *2
+  948 0D13' 09          	add	hl,bc		; 1. Element
+  949 0D14' EB          	ex	de,hl
+  950 0D15' 29          	add	hl,hl		; *2
+  951 0D16' 09          	add	hl,bc		; 2. Element
+  952 0D17' EB          	ex	de,hl
+  953 0D18' 4E          	ld	c,(hl)
+  954 0D19' 23          	inc	hl
+  955 0D1A' 46          	ld	b,(hl)		; BC ist Adresse des ersten Elements
+  956 0D1B' EB          	ex	de,hl
+  957 0D1C' 59          	ld	e,c
+  958 0D1D' 50          	ld	d,b		; DE ist Adresse des ersten Elements
+  959 0D1E' 4E          	ld	c,(hl)
+  960 0D1F' 23          	inc	hl
+  961 0D20' 66          	ld	h,(hl)
+  962 0D21' 69          	ld	l,c		; HL ist Adresse des zweiten Elements
+  963 0D22' 06 0B       	ld	b,11		; Anzahl Zeichen 8.3
+  964 0D24' 1A          CMPLE:	ld	a,(de)
+  965 0D25' BE          	cp	(hl)		; Vergleich
+  966 0D26' 13          	inc	de
+  967 0D27' 23          	inc	hl
+  968 0D28' C0          	ret	nz		; Ende, sobald ungleich
+  969 0D29' 10 F9       	djnz	CMPLE
+  970 0D2B' C9          	ret
+  971                   
+  972                   	prozent			; Fortschrittsanzeige aus USBINC einbinden
+    8 0D2C' 3A 0016'   APROZ:	ld	a,(option)	; Fortschritt wie anzeigen?
+    9 0D2F' 07         A	rlca
+   10 0D30' 30 ??      A	jr	nc,PROZ0	; Fortschrittsanzeige in Prozent
+   11 0D32' 3E 23      A	ld	a,'#'
+   12 0D34' C3 0000#   A	jp	cout		; Zeichen anzeigen fuer einen Datenblock
+   14 0D37' DD 21 0000#APROZ0:	LD	IX,FILESIZE0	; Gesamtdateigroesse
+   15 0D3B' ED 5B 0000#A	ld	de,(filesize)
+   16 0D3F' ED 4B ???? A	ld	bc,(filesize+2)	; BCDE = restliche Anzahl
+   17 0D43' DD 7E 00   A	ld	a,(ix)
+   18 0D46' 93         A	sub	e
+   19 0D47' 5F         A	ld	e,a
+   20 0D48' DD 7E 01   A	ld	a,(ix+1)
+   21 0D4B' 9A         A	sbc	a,d
+   22 0D4C' 57         A	ld	d,a
+   23 0D4D' DD 7E 02   A	ld	a,(ix+2)
+   24 0D50' 99         A	sbc	a,c
+   25 0D51' 4F         A	ld	c,a
+   26 0D52' DD 7E 03   A	ld	a,(ix+3)
+   27 0D55' 98         A	sbc	a,b
+   28 0D56' 47         A	ld	b,a		; BCDE = abgearbeitete Groesse
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  29
+UPUT    Z80
+
+   29 0D57' 3E 0D      A	ld	a,cr
+   30 0D59' CD 0000#   A	call	cout		; Cursor an Zeilenanfang setzen
+   31 0D5C' DD 7E 00   A	LD	A,(IX)
+   32 0D5F' DD B6 01   A	OR	(IX+1)
+   33 0D62' DD B6 02   A	OR	(IX+2)
+   34 0D65' DD B6 03   A	OR	(IX+3)
+   35 0D68' 28 ??      A	JR	Z,PROZ1		; Dateigroesse = 0 -> 100,0%
+   36 0D6A' AF         A	xor	a
+   37 0D6B' 08         A	ex	af,af'		; fuehrende Nullen ausblenden
+   38 0D6C' CD 0000#   A	call	ZIFFER		; Hunderter anzeigen
+   39 0D6F' CD 0000#   A	call	mul10		; BCDE * 10
+   40 0D72' CD 0000#   A	call	ZIFFER		; Zehner anzeigen
+   41 0D75' CD 0000#   A	call	mul10		; BCDE * 100
+   42 0D78' 3E 30      A	ld	a,'0'
+   43 0D7A' 08         A	ex	af,af'
+   44 0D7B' CD 0000#   A	call	ZIFFER		; Einer anzeigen
+   45 0D7E' 3E 2C      A	ld	a,','
+   46 0D80' CD 0000#   A	call	cout		; Trennzeichen
+   47 0D83' CD 0000#   A	call	mul10		; BCDE * 1000
+   48 0D86' CD 0000#   A	call	ZIFFER		; Zehntel anzeigen
+   49 0D89' 3E 25      A	ld	a,'%'
+   50 0D8B' C3 0000#   A	jp	cout
+   51 0D8E' CD 0000#   APROZ1:	call	eprint
+   52 0D91' 31 30 30 2CA	db	'100,0%',0
+   53 0D98' C9         A	ret
+   60 0D99' CB 23      Amul10:	SLA	E
+   61 0D9B' CB 12      A	RL	D
+   62 0D9D' CB 11      A	RL	C
+   63 0D9F' CB 10      A	RL	B	; *2
+   64 0DA1' C5         A	push	bc
+   65 0DA2' D5         A	push	de
+   66 0DA3' CB 23      A	SLA	E
+   67 0DA5' CB 12      A	RL	D
+   68 0DA7' CB 11      A	RL	C
+   69 0DA9' CB 10      A	RL	B	; *4
+   70 0DAB' CB 23      A	SLA	E
+   71 0DAD' CB 12      A	RL	D
+   72 0DAF' CB 11      A	RL	C
+   73 0DB1' CB 10      A	RL	B	; *8
+   74 0DB3' E1         A	POP	HL
+   75 0DB4' 19         A	ADD	HL,DE
+   76 0DB5' EB         A	EX	DE,HL
+   77 0DB6' E1         A	POP	HL
+   78 0DB7' ED 4A      A	ADC	HL,BC
+   79 0DB9' 44         A	LD	B,H
+   80 0DBA' 4D         A	LD	C,L	; BCDE*10 (8+2)
+   81 0DBB' C9         A	ret
+   91 0DBC' 2E 99      AZIFFER:	LD	L,99H		; Zaehler
+   92 0DBE' 7D         AZIFF1:	LD	A,L
+   93 0DBF' C6 01      A	ADD	A,1		; HL = HL+1 (BCD)
+   94 0DC1' 27         A	DAA
+   95 0DC2' 6F         A	LD	L,A
+   97 0DC3' 7B         A	LD	A,E
+   98 0DC4' DD 96 00   A	SUB	(IX)		; E = niederwertigstes Byte
+   99 0DC7' 5F         A	LD	E,A
+  100 0DC8' 7A         A	LD	A,D
+  101 0DC9' DD 9E 01   A	SBC	A,(IX+1)	; D = mittleres Byte
+  102 0DCC' 57         A	LD	D,A
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  30
+UPUT    Z80
+
+  103 0DCD' 79         A	LD	A,C
+  104 0DCE' DD 9E 02   A	SBC	A,(IX+2)	; C = hoeherwertiges Byte
+  105 0DD1' 4F         A	LD	C,A
+  106 0DD2' 78         A	LD	A,B
+  107 0DD3' DD 9E 03   A	SBC	A,(IX+3)	; B = hoechstwertiges Byte
+  108 0DD6' 47         A	LD	B,A
+  109 0DD7' 30 E5      A	JR	NC,ZIFF1	; nochmal enthalten
+  111 0DD9' 7B         A	LD	A,E
+  112 0DDA' DD 86 00   A	ADD	A,(IX)		; letzten Teil wieder addieren
+  113 0DDD' 5F         A	LD	E,A
+  114 0DDE' 7A         A	LD	A,D
+  115 0DDF' DD 8E 01   A	ADC	A,(IX+1)
+  116 0DE2' 57         A	LD	D,A
+  117 0DE3' 79         A	LD	A,C
+  118 0DE4' DD 8E 02   A	ADC	A,(IX+2)
+  119 0DE7' 4F         A	LD	C,A
+  120 0DE8' 78         A	LD	A,B
+  121 0DE9' DD 8E 03   A	ADC	A,(IX+3)
+  122 0DEC' 47         A	LD	B,A
+  124 0DED' 7D         A	LD	A,L
+  125 0DEE' E6 0F      A	AND	0FH		; Zahler = null?
+  126 0DF0' 20 ??      A	JR	NZ,ZIFF2	; nein, sofort anzeigen
+  127 0DF2' 08         A	EX	AF,AF'
+  128 0DF3' F5         A	PUSH	AF
+  129 0DF4' 08         A	EX	AF,AF'
+  130 0DF5' F1         A	POP	AF
+  131 0DF6' B7         A	OR	A		; laeuft Ausgabe schon?
+  132 0DF7' C8         A	RET	Z		; nein, keine fuehrende Nullen!
+  133 0DF8' 08         AZIFF2:	EX	AF,AF'
+  134 0DF9' 3E 30      A	LD	A,'0'		; Ausgabe laeuft
+  135 0DFB' 08         A	EX	AF,AF'
+  136 0DFC' F6 30      A	OR	'0'		; Ziffer
+  137 0DFE' C3 0000#   A	JP	COUT		; anzeigen
+  973                   
+  974                   ; Datenbereich:
+  975                   
+  976                   	DSEG
+  977 0000" 00          wild:		db	0	; mehrdeutiger Dateiname?
+  978 0001" 00          fsize:		db	0	; Blockgroesse (128 oder weniger)
+  979 0002" 0000  0000  filesize0:	dw	0,0	; Dateigroesse in Sektoren
+  980 0006" 0000  0000  filesize:	dw	0,0	; Dateigroesse in Sektoren - Laufvariable
+  981 000A" 0000        kbyte:		dw	0	; Dateigroesse in KByte
+  982 000C" 00          stempel:	db	0	; Datumstempel vorhanden?
+  983         000A      size	equ	10		; Puffergroesse
+  984 000D" 00 00 00 00 data:		ds	size,0	; Datenpuffer fuer DIRT
+  985                   
+  986 0017" 0000  0000  DOSDAT:		DW	0,0	; MS-DOS Datum
+  987 001B" 00 00 00 00 Datum1:		DS	5,0	; Erstellt-Datum im CP/M-Format (BCD)
+  988 0020" 00 00 00 00 Datum2:		DS	5,0	; Zugriff-Datum - bleibt Null!
+  989 0025" 00 00 00 00 Datum3:		DS	5,0	; Modify-Datum im CP/M-Format (BCD)
+  990         0025"     JAHR	equ	Datum3
+  991         0026"     MONAT	equ	Datum3+1
+  992         0027"     TAG	equ	Datum3+2
+  993         0028"     STUNDE	equ	Datum3+3
+  994         0029"     MINUTE	equ	Datum3+4
+  995 002A" 00 00 00 00 Datum4:		DS	5,0	; Datum der vorhandenen Datei
+  996 002F" 0000        pointer:	dw	0	; Zeiger Verzeichnispuffer
+  997 0031" 0000        count:		dw	0	; Anzahl Dateien
+Z80ASM SuperFast Relocating Macro Assembler     	    Z80ASM 1.30 Page  31
+UPUT    Z80
+
+  998 0033" 0000        count2:		dw	0	; Zaehler fuer uebertragene Dateien
+  999 0035" 0000        counter:	dw	0	; laufende Nummer
+ 1000 0037" 0000        table:		dw	0	; Zeiger auf Beginn der Zeigertabelle (Sort)
+ 1001 0039" 0000        GAP:		dw	0	; Variable fuer SORT
+ 1002 003B" 0000        J:		dw	0	;	"	"
+ 1003                   
+ 1004 003D" 0000        tpaend:		dw	0	; nutzbare TPA-Endadresse
+ 1005                   	END
+ 0 Error(s) Detected. 3585 Program Bytes. 63 Data Bytes.
+ 220 Symbols Detected.
+CD)
+  990         0025"     JAHR	equ	Datum3
+  991         0026"     MON
