@@ -1,0 +1,270 @@
+;---------------------------------------------------------------
+;
+;	UTools Version 1.3 (von M. Leubner)
+;
+; Hilfsprogramme zur Arbeit mit USB-Sticks unter CP/M
+;
+;	DRV-Treiber fuer VDIP1 oder VDIP2 an Modul M052
+;	mit Status-Abfrage per ESC-Befehl
+;	(und Interrupt -> Koppel-RAM)
+;
+; V1.0 (16.03.2008): zyklischer CTC-Interrupt
+; V1.1 (20.04.2008): PIO-Interrupt - modifizierter Schaltplan!
+;	20.07.2008 : Fehlerkorrektur falls Modul nicht vorhanden
+; V1.2 (31.01.2009): Bit 6+7 von PIO-Port B auf "1" gesetzt
+;		     damit kein Problem an #RESET & #PROG
+;		   - Version fuer M001 und M052 anpassbar
+; V1.3 (18.10.2009): Extra-Treiber M052.DRV um Modul zu schalten,
+;		   - M001 nicht mehr unterstuetzt
+;
+; USBDRV.Z80 -> USB.DRV       08.01.2008 - 18.10.2009
+;---------------------------------------------------------------
+; Uebersetzung:		SLRZ80 USBDRV/M  oder ASM USBDRV=USBDRV.Z80
+;			LINK131 USB.DRV=USBDRV.REL [OP,NR]
+;			ERA USBDRV.REL
+;---------------------------------------------------------------
+;
+; Treiber-Funktionen:	ESC,o,ID,0,0	Initialisierung
+;			ESC,o,ID,1,0	Deinitialisierung
+;			ESC,o,ID,2,0	Umleitung Koppeltreiber ein
+;			ESC,o,ID,3,0	Umleitung Koppeltreiber aus
+;			ESC,o,ID,4,0	Statusabfrage
+
+	.Z80		; CPU-Type
+
+; Makros:
+PRMSG   MACRO   MSG,N       
+	.PRINTX *MSG,N*
+	ENDM
+
+; Vereinbarungen:
+IVEK	EQU	0D0H	; Interrupt-Vektor (PIO Port B)
+STATUS	EQU	0C0F3H	; FFC0H im Koppel-RAM
+
+; CAOS-Systemprogramme:
+PV1	EQU	0F003H	; Sprungverteiler
+INIEA	EQU	43H
+INIME	EQU	44H
+
+; Portadressen der Vinculum-PIO im M052:
+PIOA	EQU	2Ch	; Daten A
+PIOB	EQU	2Dh	; Daten B
+PIOAS	EQU	2Eh	; Steuer A
+PIOBS	EQU	2Fh	; Steuer B
+
+;***************************************
+; DRV-Header:
+
+TOP:	JR	START			; Programmverteiler
+ID:	DB	26			; ID fuer USB-Treiber
+	DB	13H			; Version 1.3
+	DB	00H or High (SIZE-1)	; Speicherbedarf
+USE:	DB	0			; USE-Counter
+SUB1:	DB	28			; Treiber M052.DRV erforderlich
+ADR1:	DB	10H			; in Version 1.0 / dann Adresse
+	DB	0			; keine weiteren Treiber erforderlich
+	DB	'M052USB',0		; Name des Treibers
+
+; Sprungverteiler Koppeltreiber (10 Byte):
+
+KOP:	RET		; Initialisierung (nicht genutzt)
+	NOP		; hier koennten noch Daten liegen!
+	JR	JPUT	; Byte-Ausgabe
+	JP	GET	; Byte-Eingabe
+JPUT:	JP	PUT
+ksize	equ	$-KOP	; Anzahl Bytes fuer Umschaltung
+
+MEM:	DS	ksize,0	; Ablage der Ursprungsdaten
+
+; Initialisierungsdaten:
+
+DATA:	DB	3		; 3 Ports
+
+	DB	PIOBS		; PIO Port B
+	 DB	5		; Anzahl
+	  DB	0CFH		; Bitbetrieb
+	  DB	00110011b	; I/O festlegen
+	  DB	IVEK		; Interruptvektor
+	  DB	97H		; EI, Maske folgt
+	  DB	0FFH		; kein Bit aktiv
+
+	DB	PIOB		; Daten zu PIO Port B
+	 DB	2		; Anzahl
+	  DB	84H		; #PROG=1, #RESET=0
+	  DB	0C4H		; RD&WR inaktiv
+
+	DB	PIOAS		; PIO Port A
+	 DB	2		; Anzahl
+	  DB	8FH		; bidirektional
+	  DB	07H		; kein INT
+ 
+; Sprungverteiler:
+
+START:	OR	A
+	JR	Z,INIT		; A=0 Initialisierung
+	DEC	A
+	JR	Z,DINIT		; A=1 Deinitialisierung
+	DEC	A
+	JR	Z,UMEIN		; A=2 Umleitung Koppeltreiber ein
+	DEC	A
+	JR	Z,UMAUS		; A=3 Umleitung Koppeltreiber aus
+	DEC	A
+	JP	Z,STAT		; A=4 Statusabfrage
+	RET
+JPHL:	JP	(HL)		; Sprungfunktion fuer Treiberaufruf
+
+; Funktion A=0 Initialisierung:
+; PA:	A=0	OK
+;	A=0FEH	Modul oder M052.DRV nicht gefunden
+
+INIT:	LD	A,(USE)
+	OR	A		; bereits initialisiert?
+	JR	NZ,INIT1	; ja, dann nur USE erhoehen
+
+; Modulnutzung des M052 anmelden (M052.DRV schaltet PIO's ein):
+
+	LD	HL,(SUB1)	; Subtreiber 1
+	LD	A,L		; ID von M052.DRV
+	LD	L,2		; Zeiger auf ID im Treiber M052.DRV
+	CP	(HL)		; Kontrolle: SUB-Treiber vorhanden?
+	LD	A,0FEH		; Fehlercode zurueckgeben
+	JR	NZ,IERR		; nein - Abbruch der Initialisierung!
+	XOR	A		; Funktion 0 = Initialisierung
+	LD	L,A		; HL=Sprungadresse
+	CALL	JPHL		; Subtreiber initialisieren
+	OR	A		; erfolgreich initialisiert?
+	JR	NZ,IERR		; nein, Treiber nicht arbeitsfaehig
+				; A: Rueckgabe Fehlercode Subtreiber
+
+; Interrupttabelle fuer Status-Interrupt eintragen:
+
+	LD	A,I
+	LD	H,A
+	LD	L,IVEK
+	LD	DE,ISR
+	LD	(HL),E
+	INC	HL		; ISR eintragen
+	LD	(HL),D
+
+; PIO initialisieren:
+ 
+	LD	HL,DATA		; INIT-Daten
+	LD	D,(HL)		; Anzahl Ports
+	INC	HL
+	CALL	PV1		; PIO initialisieren
+	DB	INIME
+	IN	A,(PIOA)	; Dummy-Eingabe
+
+; Einsprungtabelle vom Original-Koppeltreiber merken:
+
+	ld	hl,0380h	; Speicherplatz Koppeltreiber
+	ld	de,mem		; Zwischenspeicher
+	ld	bc,ksize
+	ldir			; Originaldaten merken
+
+INIT1:	LD	HL,USE
+	INC	(HL)		; eigenen USE-Counter erhoehen
+	XOR	A		; OK melden
+	ret
+
+; Funktion A=1 Deinitialisierung:
+; PA:	A=0	Treiber wurde geloescht
+;	A>0	verbleibender USE-Counter
+
+DINIT:	LD	HL,USE
+	DEC	(HL)		; USE-Counter verringern
+	LD	A,(HL)
+	RET	NZ		; weitere Abhaengigkeiten vorhanden
+	LD	A,3		; PIO-Interrupt AUS
+	OUT	(PIOBS),A
+	call	umaus		; Ursprungs-Koppeltreiber regenerieren
+
+; Modulnutzung des M052 abmelden:
+
+	LD	HL,(SUB1)	; benutzter Subtreiber 1
+	LD	A,L		; ID von M052.DRV
+	LD	L,2		; Zeiger auf ID im Treiber M052.DRV
+	CP	(HL)		; SUB-Treiber noch vorhanden?
+	LD	A,1		; Funktion 1 = Deinitialisierung
+	LD	L,0		; HL=Sprungadresse
+	CALL	Z,JPHL		; Subtreiber deinitialisieren
+	XOR	A		; geloescht melden
+IERR:	LD	HL,ID
+	LD	(HL),0		; eigenen ID-Code loeschen
+	RET
+
+; Funktion A=2 Umleitung Koppeltreiber aktivieren:
+
+UMEIN:	ld	hl,kop		; USB-Koppeltreiber
+	jr	UM
+
+; Funktion A=3 Umleitung Koppeltreiber aktivieren:
+
+UMAUS:	ld	hl,mem		; Original-Koppeltreiber
+UM:	ld	de,0380h
+	ld	bc,ksize
+	ldir			; Koppeltreiber umladen
+	RET
+
+; Ausgabe Datenbyte (Koppeltreiber):
+; PE:	A	Datenbyte
+; VR:	AF
+
+PUT:	OUT	(PIOA),A	; Datenbyte ausgeben
+WAIT:	IN	A,(PIOB)
+	RRCA
+	RRCA
+	JR	C,WAIT		; nicht bereit!
+	LD	A,0CCH
+	OUT	(PIOB),A	; WR aktiv
+	LD	A,0C4H
+	OUT	(PIOB),A	; WR inaktiv
+
+; Funktion A=4 Statusabfrage:
+; PA:	A	Statusbyte
+; VR:	AF
+
+stat:	IN	A,(PIOB)	; VDIP-Statusbits
+	LD	BC,STATUS
+	OUT	(C),A		; in Koppel-RAM schreiben
+	RET
+
+; Eingabe Datenbyte (Koppeltreiber):
+; PA:	A	Datenbyte
+; VR:	AF,AF'
+
+GET:	IN	A,(PIOB)
+	RRCA
+	JR	C,GET		; keine Daten
+	LD	A,0C0H		; RD# aktiv
+	OUT	(PIOB),A
+	IN	A,(PIOA)	; Daten holen
+	EX	AF,AF'
+	LD	A,0C4H		; RD# inaktiv
+	OUT	(PIOB),A
+	call	stat		; Status aktualisieren
+	EX	AF,AF'
+	ret
+
+; ----- ISR (PIO-B) Statusabfrage ------
+ 
+ISR:	push	bc
+	push	af
+	in	a,(PIOA)	; Dummy-Eingabe
+	call	stat		; Status -> Koppel-RAM
+	pop	af
+	pop	bc
+	ei
+	reti
+
+;***************************************
+SIZE	EQU	$-TOP	; Speicherbedarf
+;*** Codeende **************************
+
+IF2
+	.PRINTX "USB-Treiber fuer M052"
+	.RADIX  16
+	PRMSG   <Speicherbedarf=>,%SIZE
+	.RADIX  10
+ENDIF
+	END
