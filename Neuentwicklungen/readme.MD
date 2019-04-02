@@ -1,0 +1,1 @@
+#Neuentwickelte Hardware
