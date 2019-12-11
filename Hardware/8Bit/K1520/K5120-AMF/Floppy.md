@@ -33,9 +33,12 @@ GND | A13 | ungerade | ungerade
 /RD | B13 | 30 | 30
 
 
-/MO0 am PC ist 10
-/MO1 am PC ist 16
+/MO0 am PC ist Pin 10
+
+/MO1 am PC ist Pin 16
+
 Pin 34 ist DC
 
 /MO am K5601 (16) wird über Jumper mit InUse gesetzt 
+
 /SS ist durch Signal xx relisiert
