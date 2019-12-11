@@ -12,8 +12,8 @@ GND | B1 | ungerade | ungerade
 /FR | A3 | x | x
 /SE4 | B3 | 6 | x
 /SE3 |	A4 | 14 | x
-/SE2 |	B4 | 12 | 
-/SE1 | A5 | 10 | 
+/SE2 |	B4 | 12 | 12 
+/SE1 | A5 | 10 | 14
 /WD | B5 | 22 | 22
 /RDY |	A6 | 34 | 34 (DC)
 /WE |	B6 | 24 | 24
@@ -33,3 +33,9 @@ GND | A13 | ungerade | ungerade
 /RD | B13 | 30 | 30
 
 
+/MO0 am PC ist 10
+/MO1 am PC ist 16
+Pin 34 ist DC
+
+/MO am K5601 (16) wird über Jumper mit InUse gesetzt 
+/SS ist durch Signal xx relisiert
