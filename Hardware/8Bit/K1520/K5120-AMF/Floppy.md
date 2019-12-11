@@ -5,31 +5,31 @@
 
 Signal | EFS 26 | K5101 | PC-Floppy
 ------------ | ------------- | ------------ | ------------- 
-GND | A1 | 19 | 10
-GND | B1 | 10 | 9
-/HL |	A2 | 13 | 12
-/SD |	B2 | 14 | 15
-/FR | A3 | 19 | 10
-/SE4 | B3 | 10 | 9
-/SE3 |	A4 | 13 | 12
-/SE2 |	B4 | 14 | 15
-/SE1 | A5 | 19 | 10
-/WD | B5 | 10 | 9
-/RDY |	A6 | 13 | 12
-/WE |	B6 | 14 | 15
-/ST | A7 | 19 | 10
-/LCK4 | B7 | 10 | 9
-GND |	A8 | 13 | 12
-/LCK3 |	B8 | 14 | 15
-/LCK2 | A9 | 19 | 10
-/LCK1 | B9 | 10 | 9
-GND |	A10 | 13 | 12
-/WP |	B10 | 14 | 15
-/T0 | A11 | 19 | 10
-/FW | B11 | 10 | 9
-GND |	A12 | 13 | 12
-/IX |	B12 | 14 | 15
-GND | A13 | 19 | 10
-/RD | B13 | 10 | 9
+GND | A1 | ungerade | ungerade
+GND | B1 | ungerade | ungerade
+/HL |	A2 | x | x
+/SD |	B2 | 18 | 18
+/FR | A3 | x | x
+/SE4 | B3 | 6 | x
+/SE3 |	A4 | 14 | x
+/SE2 |	B4 | 12 | 
+/SE1 | A5 | 10 | 
+/WD | B5 | 22 | 22
+/RDY |	A6 | 34 | 34 (DC)
+/WE |	B6 | 24 | 24
+/ST | A7 | 20 | 20
+/LCK4 | B7 | x | x
+GND |	A8 | ungerade | ungerade
+/LCK3 |	B8 | x | x
+/LCK2 | A9 | x | x
+/LCK1 | B9 | x | x
+GND |	A10 | ungerade | ungerade
+/WP |	B10 | 28 | 28
+/T0 | A11 | 26 | 26
+/FW | B11 | x | x
+GND |	A12 | ungerade | ungerade
+/IX |	B12 | 8 | 8
+GND | A13 | ungerade | ungerade
+/RD | B13 | 30 | 30
 
 
